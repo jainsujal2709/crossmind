@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CrossMind Admin Center</title>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <main class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h1>Platform Management Console 🛡️</h1>
+      <div class="side">
+        <button class="btn primary" onclick="dash()">Overview Stats</button>
+        <button class="btn accent" onclick="users()">Manage Users</button>
+        <button class="btn alt" onclick="logs()">System Logs</button>
+        <a class="btn alt" href="/app.html#dashboard">Exit to App</a>
+      </div>
+    </div>
+    <div id="v"></div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script>
+    renderAppNav(true);
+    const H = h => $('#v').innerHTML = h;
+
+    async function dash() {
+      try {
+        const d = await API.f('/admin/dashboard');
+        H(`
+          <div class="grid cols-4">
+            <div class="card"><div class="stat">${d.users}</div><div class="mu">Total Registered Users</div></div>
+            <div class="card"><div class="stat">${d.teachers}</div><div class="mu">Teachers</div></div>
+            <div class="card"><div class="stat">${d.students}</div><div class="mu">Students</div></div>
+            <div class="card"><div class="stat">${d.classrooms}</div><div class="mu">Classrooms</div></div>
+          </div>
+
+          <div class="grid cols-4" style="margin-top:20px;">
+            <div class="card"><div class="stat">${d.quizzes}</div><div class="mu">Assigned Quizzes</div></div>
+            <div class="card"><div class="stat">${d.crosswords}</div><div class="mu">Crosswords Created</div></div>
+            <div class="card"><div class="stat">${d.quiz_attempts}</div><div class="mu">Quiz Submissions</div></div>
+            <div class="card"><div class="stat">${d.avg_quiz_score}%</div><div class="mu">Avg Quiz Score</div></div>
+          </div>
+        `);
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+
+    async function users() {
+      try {
+        const u = await API.f('/admin/users');
+        H(`
+          <div class="card" style="overflow-x:auto">
+            <h3>Registered User Accounts</h3>
+            <table class="t">
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${u.map(x => `
+                  <tr>
+                    <td><b>${x.name}</b></td>
+                    <td>${x.email}</td>
+                    <td><span class="tag ${x.role === 'teacher' ? 'completed' : 'active'}">${x.role.toUpperCase()}</span></td>
+                    <td>${x.active ? '<span style="color:var(--ok)">Active</span>' : '<span style="color:var(--bad)">Disabled</span>'}</td>
+                    <td>${x.joined}</td>
+                    <td>
+                      ${x.role === 'admin' ? '<i>System Admin</i>' : `
+                        <button class="btn alt" onclick="tg(${x.id})">${x.active ? 'Disable' : 'Enable'}</button>
+                        <button class="btn bad" onclick="rm(${x.id})">Delete</button>
+                      `}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `);
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+
+    async function tg(id) {
+      if (confirm('Toggle active status for this user?')) {
+        await API.f(`/admin/users/${id}/toggle`, { method: 'POST' });
+        users();
+      }
+    }
+
+    async function rm(id) {
+      if (confirm('Permanently delete this user and all associated data?')) {
+        await API.f(`/admin/users/${id}`, { method: 'DELETE' });
+        users();
+      }
+    }
+
+    async function logs() {
+      try {
+        const l = await API.f('/admin/logs');
+        H(`
+          <div class="card">
+            <h3>Recent System Logs</h3>
+            <table class="t">
+              <thead><tr><th>Timestamp</th><th>Level</th><th>Message</th></tr></thead>
+              <tbody>
+                ${l.map(x => `
+                  <tr>
+                    <td>${x.at}</td>
+                    <td><b style="color:${x.level==='error'?'var(--bad)':'var(--p)'}">${x.level.toUpperCase()}</b></td>
+                    <td>${x.msg}</td>
+                  </tr>
+                `).join('') || '<tr><td colspan="3">No system logs.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `);
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+
+    dash().catch(() => location = '/index.html');
+  </script>
+</body>
+</html>

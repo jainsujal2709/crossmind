@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-multipart
+python-dotenv
+pyjwt
+bcrypt
+pymupdf
+python-pptx
+python-docx
+openpyxl
+xlrd
+psycopg2-binary

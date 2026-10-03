@@ -1,0 +1,13 @@
+[build]
+  command = "bash scripts/netlify_build.sh"
+  publish = "dist"
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+# Netlify static publishing configuration for CrossMind EdTech Platform
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  conditions = {Role = ["!*"]}
