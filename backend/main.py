@@ -8,6 +8,8 @@ from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import re
+from urllib.parse import parse_qsl, urlencode
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import config, parser, nlp, crossword, quiz_generator
 from models import *
@@ -67,6 +69,27 @@ async def db_guard(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.url.path != "/api/health" and not _ready and not init_db():
         return JSONResponse({"detail": f"Database is not reachable ({_init_error}). Check DATABASE_URL in your hosting settings, then see /api/health."}, 503)
     return await call_next(request)
+
+@app.middleware("http")
+async def restore_original_path(request: Request, call_next):
+    """Vercel may hand the app the rewritten function path (/api/index.py) instead of the URL the
+    browser asked for. vercel.json passes the real path along as ?__p=..., so put it back before routing.
+    (Registered after the other middleware so it runs first.)"""
+    if request.scope["path"].endswith("/index.py"):
+        pairs = parse_qsl(request.scope.get("query_string", b"").decode(), keep_blank_values=True)
+        orig = next((v for k, v in pairs if k == "__p"), None)
+        if orig and orig.startswith("/api/"):
+            request.scope["path"] = orig
+            request.scope["raw_path"] = orig.encode()
+            request.scope["query_string"] = urlencode([(k, v) for k, v in pairs if k != "__p"]).encode()
+    return await call_next(request)
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error_handler(request: Request, e: StarletteHTTPException):
+    body = {"detail": e.detail}
+    if e.status_code == 404 and e.detail == "Not Found":
+        body["path"] = request.url.path          # helps diagnose hosting/routing problems
+    return JSONResponse(body, e.status_code, headers=getattr(e, "headers", None))
 
 @app.get("/api/health")
 def health():
