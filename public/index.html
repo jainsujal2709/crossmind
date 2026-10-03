@@ -13,8 +13,8 @@
     <div class="nav-links">
       <a href="#benefits">Features</a>
       <a href="#how">How it Works</a>
-      <a href="#auth" class="btn alt" onclick="showAuthModal('student')">Student Login</a>
-      <a href="#auth" class="btn primary" onclick="showAuthModal('teacher')">Teacher Login</a>
+      <a href="#auth" class="btn alt" onclick="showAuthModal('login')">Student Login</a>
+      <a href="#auth" class="btn primary" onclick="showAuthModal('login')">Teacher Login</a>
       <button class="btn alt" onclick="theme()" aria-label="Toggle theme">◐ Theme</button>
     </div>
   </nav>
@@ -25,9 +25,9 @@
     <p class="hero-subtitle">CrossMind automatically converts PDFs, slides, documents, and notes into AI crosswords, classroom quizzes, and live gamified leaderboards.</p>
     
     <div class="hero-actions">
-      <button class="btn primary lg" onclick="showAuthModal('student', '#create')">🎮 Create Crossword</button>
-      <button class="btn accent lg" onclick="showAuthModal('student', '#join')">🔑 Join Classroom</button>
-      <button class="btn alt lg" onclick="showAuthModal('teacher')">👨‍🏫 Teacher Portal</button>
+      <button class="btn primary lg" onclick="showAuthModal('reg', '#create')">🎮 Create Crossword</button>
+      <button class="btn accent lg" onclick="showAuthModal('reg', '#join')">🔑 Join Classroom</button>
+      <button class="btn alt lg" onclick="showAuthModal('login')">👨‍🏫 Teacher Login</button>
     </div>
 
     <div class="hero-demo-grid">
@@ -62,13 +62,13 @@
       <div class="card auth-card">
         <div class="auth-tabs">
           <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">Sign In</button>
-          <button class="auth-tab" id="tab-reg" onclick="switchAuthTab('reg')">Create Account</button>
+          <button class="auth-tab" id="tab-reg" onclick="switchAuthTab('reg')">Student Sign Up</button>
         </div>
 
         <!-- Login Form -->
         <div id="form-login" class="auth-form">
           <h3>Welcome Back to CrossMind</h3>
-          <p class="mu">Sign in to access your classrooms, quizzes, and crosswords.</p>
+          <p class="mu">Students and teachers sign in here. Teacher accounts are issued by the administrator.</p>
           <label>Email Address
             <input id="le" type="email" placeholder="student@example.com" required>
           </label>
@@ -80,8 +80,8 @@
 
         <!-- Register Form -->
         <div id="form-reg" class="auth-form" style="display:none">
-          <h3>Create Your CrossMind Account</h3>
-          <p class="mu">Join as a Student or Teacher to start learning.</p>
+          <h3>Create Your Student Account</h3>
+          <p class="mu">Student registration is open to everyone. Teachers cannot self-register &mdash; the administrator creates teacher accounts.</p>
           <label>Full Name
             <input id="rn" type="text" placeholder="Sujal Patil" required>
           </label>
@@ -91,13 +91,19 @@
           <label>Password (min 6 chars)
             <input id="rp" type="password" placeholder="••••••••" required>
           </label>
-          <label>Account Type / Role
-            <select id="rr">
-              <option value="student">🎓 Student (Join classrooms & solve quizzes)</option>
-              <option value="teacher">👨‍🏫 Teacher (Create classrooms & generate quizzes)</option>
-            </select>
+          <label>Roll No. (optional)
+            <input id="rroll" type="text" placeholder="e.g. 23CS045">
           </label>
-          <button class="btn accent block lg" onclick="reg()">Register Account</button>
+          <label>Course / Class (optional)
+            <input id="rcourse" type="text" placeholder="e.g. B.Tech CSE">
+          </label>
+          <label>Division (optional)
+            <input id="rdiv" type="text" placeholder="e.g. A">
+          </label>
+          <label>Phone (optional)
+            <input id="rphone" type="tel" placeholder="e.g. 9876543210">
+          </label>
+          <button class="btn accent block lg" onclick="reg()">Register as Student</button>
         </div>
       </div>
     </section>
@@ -151,8 +157,8 @@
 
     let targetRedirect = '';
 
-    function showAuthModal(role, redirect) {
-      if(role) $('#rr').value = role;
+    function showAuthModal(tab, redirect) {
+      switchAuthTab(tab === 'reg' ? 'reg' : 'login');
       if(redirect) targetRedirect = redirect;
       document.getElementById('auth').scrollIntoView({behavior: 'smooth'});
     }
@@ -192,14 +198,16 @@
 
     async function reg() {
       try {
-        const role = $('#rr').value;
         const res = await API.f('/auth/register', {
           method: 'POST',
           json: {
             name: $('#rn').value,
             email: $('#re').value,
             password: $('#rp').value,
-            role: role
+            roll_no: $('#rroll').value,
+            course: $('#rcourse').value,
+            division: $('#rdiv').value,
+            phone: $('#rphone').value
           }
         });
         toast('Account registered! Auto-logging in...');

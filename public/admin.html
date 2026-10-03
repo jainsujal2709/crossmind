@@ -5,15 +5,24 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CrossMind Admin Center</title>
   <link rel="stylesheet" href="css/main.css">
+  <style>
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+    .toolbar input[type=search]{flex:1;min-width:200px}
+    .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:12px 0}
+    .row-actions{display:flex;gap:6px;flex-wrap:wrap}
+    .btn.sm{padding:6px 10px;font-size:13px}
+    .side .btn.on{outline:3px solid var(--p)}
+  </style>
 </head>
 <body>
   <main class="container">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
       <h1>Platform Management Console 🛡️</h1>
       <div class="side">
-        <button class="btn primary" onclick="dash()">Overview Stats</button>
-        <button class="btn accent" onclick="users()">Manage Users</button>
-        <button class="btn alt" onclick="logs()">System Logs</button>
+        <button class="btn primary" id="b-dash" onclick="dash()">Overview</button>
+        <button class="btn accent" id="b-teacher" onclick="people('teacher')">Teachers</button>
+        <button class="btn accent" id="b-student" onclick="people('student')">Students</button>
+        <button class="btn alt" id="b-logs" onclick="logs()">System Logs</button>
         <a class="btn alt" href="/app.html#dashboard">Exit to App</a>
       </div>
     </div>
@@ -24,78 +33,176 @@
   <script>
     renderAppNav(true);
     const H = h => $('#v').innerHTML = h;
+    // Escape anything user-controlled before putting it in innerHTML (students pick their own names!)
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const mark = id => { $$('.side .btn').forEach(b => b.classList.remove('on')); const e = $('#' + id); if (e) e.classList.add('on'); };
+    let cache = {};   // id -> user, for the edit form
 
     async function dash() {
+      mark('b-dash');
       try {
         const d = await API.f('/admin/dashboard');
         H(`
           <div class="grid cols-4">
-            <div class="card"><div class="stat">${d.users}</div><div class="mu">Total Registered Users</div></div>
+            <div class="card"><div class="stat">${d.users}</div><div class="mu">Total Users</div></div>
             <div class="card"><div class="stat">${d.teachers}</div><div class="mu">Teachers</div></div>
             <div class="card"><div class="stat">${d.students}</div><div class="mu">Students</div></div>
             <div class="card"><div class="stat">${d.classrooms}</div><div class="mu">Classrooms</div></div>
           </div>
-
-          <div class="grid cols-4" style="margin-top:20px;">
+          <div class="grid cols-4" style="margin-top:20px">
             <div class="card"><div class="stat">${d.quizzes}</div><div class="mu">Assigned Quizzes</div></div>
             <div class="card"><div class="stat">${d.crosswords}</div><div class="mu">Crosswords Created</div></div>
             <div class="card"><div class="stat">${d.quiz_attempts}</div><div class="mu">Quiz Submissions</div></div>
             <div class="card"><div class="stat">${d.avg_quiz_score}%</div><div class="mu">Avg Quiz Score</div></div>
-          </div>
-        `);
-      } catch (e) {
-        toast(e.message);
-      }
+          </div>`);
+      } catch (e) { toast(e.message); }
     }
 
-    async function users() {
+    // ---------- Teachers / Students list ----------
+    async function people(role, q = '') {
+      mark('b-' + role);
+      const isT = role === 'teacher';
       try {
-        const u = await API.f('/admin/users');
+        const list = await API.f(`/admin/users?role=${role}&q=${encodeURIComponent(q)}`);
+        cache = {}; list.forEach(u => cache[u.id] = u);
+        const head = isT
+          ? '<th>Name</th><th>Email</th><th>Emp. ID</th><th>Department</th><th>Classrooms</th><th>Quizzes</th><th>Status</th><th>Last login</th><th>Actions</th>'
+          : '<th>Name</th><th>Email</th><th>Roll No.</th><th>Course</th><th>Div</th><th>Classes joined</th><th>Quizzes taken</th><th>Status</th><th>Last login</th><th>Actions</th>';
+        const row = u => `<tr>
+          <td><b>${esc(u.name)}</b></td><td>${esc(u.email)}</td>
+          ${isT ? `<td>${esc(u.employee_id)}</td><td>${esc(u.department)}</td>`
+                : `<td>${esc(u.roll_no)}</td><td>${esc(u.course)}</td><td>${esc(u.division)}</td>`}
+          <td>${u.classrooms ?? 0}</td><td>${u.quizzes ?? 0}</td>
+          <td>${u.active ? '<span style="color:var(--ok)">Active</span>' : '<span style="color:var(--bad)">Disabled</span>'}</td>
+          <td>${esc(u.last_login)}</td>
+          <td><div class="row-actions">
+            <button class="btn alt sm" onclick="editForm(${u.id})">Edit</button>
+            <button class="btn alt sm" onclick="tg(${u.id}, '${role}')">${u.active ? 'Disable' : 'Enable'}</button>
+            <button class="btn bad sm" onclick="rm(${u.id}, '${role}')">Delete</button>
+          </div></td></tr>`;
         H(`
           <div class="card" style="overflow-x:auto">
-            <h3>Registered User Accounts</h3>
-            <table class="t">
-              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
-              <tbody>
-                ${u.map(x => `
-                  <tr>
-                    <td><b>${x.name}</b></td>
-                    <td>${x.email}</td>
-                    <td><span class="tag ${x.role === 'teacher' ? 'completed' : 'active'}">${x.role.toUpperCase()}</span></td>
-                    <td>${x.active ? '<span style="color:var(--ok)">Active</span>' : '<span style="color:var(--bad)">Disabled</span>'}</td>
-                    <td>${x.joined}</td>
-                    <td>
-                      ${x.role === 'admin' ? '<i>System Admin</i>' : `
-                        <button class="btn alt" onclick="tg(${x.id})">${x.active ? 'Disable' : 'Enable'}</button>
-                        <button class="btn bad" onclick="rm(${x.id})">Delete</button>
-                      `}
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <h3>${isT ? 'Teachers' : 'Students'} (${list.length})</h3>
+              <div class="toolbar" style="margin:0">
+                <button class="btn primary sm" onclick="addForm('${role}')">+ Add ${isT ? 'Teacher' : 'Student'}</button>
+                <button class="btn alt sm" onclick="exportCsv('${role}')">⬇ Export CSV</button>
+                <label class="btn alt sm" style="margin:0;cursor:pointer">⬆ Import CSV
+                  <input type="file" accept=".csv" style="display:none" onchange="importCsv('${role}', this)">
+                </label>
+              </div>
+            </div>
+            <p class="mu">${isT ? 'Teachers cannot register themselves. Create, edit or remove them here.' : 'Students register themselves; you can also add or edit them here.'}
+              CSV import columns: <code>name,email,password</code> + optional <code>${isT ? 'phone,employee_id,department,subject' : 'phone,roll_no,course,division'}</code>.</p>
+            <div class="toolbar">
+              <input type="search" id="q" placeholder="Search name, email, ${isT ? 'employee id, department' : 'roll no'}…" value="${esc(q)}"
+                     onkeydown="if(event.key==='Enter')people('${role}', this.value)">
+              <button class="btn alt sm" onclick="people('${role}', $('#q').value)">Search</button>
+            </div>
+            <div id="form"></div>
+            <table class="t"><thead><tr>${head}</tr></thead>
+              <tbody>${list.map(row).join('') || '<tr><td colspan="10">No records found.</td></tr>'}</tbody></table>
+          </div>`);
+      } catch (e) { toast(e.message); }
+    }
+
+    function fields(role, u = {}) {
+      const f = (id, label, val = '', type = 'text', ph = '') =>
+        `<label>${label}<input id="f-${id}" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}"></label>`;
+      return role === 'teacher'
+        ? f('employee_id', 'Employee ID', u.employee_id) + f('department', 'Department', u.department) + f('subject', 'Subject(s)', u.subject) + f('phone', 'Phone', u.phone, 'tel')
+        : f('roll_no', 'Roll No.', u.roll_no) + f('course', 'Course / Class', u.course) + f('division', 'Division', u.division) + f('phone', 'Phone', u.phone, 'tel');
+    }
+    const val = id => ($('#f-' + id) || {}).value || '';
+    const PROFILE = ['phone','employee_id','department','subject','roll_no','course','division'];
+
+    function addForm(role) {
+      $('#form').innerHTML = `
+        <div class="card" style="border:2px solid var(--p);margin-bottom:14px">
+          <h3>Add ${role === 'teacher' ? 'Teacher' : 'Student'}</h3>
+          <div class="form-grid">
+            <label>Full name<input id="f-name" type="text"></label>
+            <label>Email<input id="f-email" type="email"></label>
+            <label>Password (min 6)<input id="f-password" type="text" placeholder="Initial password"></label>
+            ${fields(role)}
           </div>
-        `);
-      } catch (e) {
-        toast(e.message);
-      }
+          <button class="btn primary" onclick="saveNew('${role}')">Create</button>
+          <button class="btn alt" onclick="$('#form').innerHTML=''">Cancel</button>
+        </div>`;
+      $('#f-name').focus();
     }
 
-    async function tg(id) {
-      if (confirm('Toggle active status for this user?')) {
-        await API.f(`/admin/users/${id}/toggle`, { method: 'POST' });
-        users();
-      }
+    async function saveNew(role) {
+      const json = { name: val('name'), email: val('email'), password: val('password') };
+      PROFILE.forEach(k => { if ($('#f-' + k)) json[k] = val(k); });
+      try {
+        await API.f(role === 'teacher' ? '/admin/teachers' : '/admin/students', { method: 'POST', json });
+        toast(role + ' created'); people(role);
+      } catch (e) { toast(e.message); }
     }
 
-    async function rm(id) {
-      if (confirm('Permanently delete this user and all associated data?')) {
-        await API.f(`/admin/users/${id}`, { method: 'DELETE' });
-        users();
-      }
+    function editForm(id) {
+      const u = cache[id];
+      $('#form').innerHTML = `
+        <div class="card" style="border:2px solid var(--p);margin-bottom:14px">
+          <h3>Edit ${esc(u.name)}</h3>
+          <div class="form-grid">
+            <label>Full name<input id="f-name" type="text" value="${esc(u.name)}"></label>
+            <label>Email<input id="f-email" type="email" value="${esc(u.email)}"></label>
+            <label>New password (leave blank to keep)<input id="f-password" type="text" placeholder="Reset password"></label>
+            ${fields(u.role, u)}
+          </div>
+          <button class="btn primary" onclick="saveEdit(${id}, '${u.role}')">Save changes</button>
+          <button class="btn alt" onclick="$('#form').innerHTML=''">Cancel</button>
+        </div>`;
+      $('#form').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function saveEdit(id, role) {
+      const json = { name: val('name'), email: val('email') };
+      if (val('password')) json.password = val('password');
+      PROFILE.forEach(k => { if ($('#f-' + k)) json[k] = val(k); });
+      try {
+        await API.f(`/admin/users/${id}`, { method: 'PUT', json });
+        toast('Saved'); people(role);
+      } catch (e) { toast(e.message); }
+    }
+
+    async function tg(id, role) {
+      if (!confirm('Enable/disable this account?')) return;
+      try { await API.f(`/admin/users/${id}/toggle`, { method: 'POST' }); people(role); } catch (e) { toast(e.message); }
+    }
+
+    async function rm(id, role) {
+      const u = cache[id];
+      const extra = role === 'teacher' ? ' This also deletes their classrooms, quizzes and all student results in them.' : '';
+      if (!confirm(`Permanently delete ${u.name}?${extra}`)) return;
+      try { await API.f(`/admin/users/${id}`, { method: 'DELETE' }); people(role); } catch (e) { toast(e.message); }
+    }
+
+    async function exportCsv(role) {
+      try {
+        const r = await fetch(API_BASE + `/api/admin/export?role=${role}`, { headers: { Authorization: 'Bearer ' + localStorage.ct } });
+        if (!r.ok) throw new Error('Export failed');
+        const url = URL.createObjectURL(await r.blob());
+        const a = document.createElement('a'); a.href = url; a.download = role + 's.csv'; a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) { toast(e.message); }
+    }
+
+    async function importCsv(role, input) {
+      if (!input.files.length) return;
+      const fd = new FormData(); fd.append('role', role); fd.append('file', input.files[0]);
+      try {
+        const r = await API.f('/admin/import', { method: 'POST', body: fd });
+        toast(`Imported ${r.created}, skipped ${r.skipped.length}`);
+        if (r.skipped.length) alert('Skipped rows:\n' + r.skipped.slice(0, 20).join('\n'));
+        people(role);
+      } catch (e) { toast(e.message); }
     }
 
     async function logs() {
+      mark('b-logs');
       try {
         const l = await API.f('/admin/logs');
         H(`
@@ -103,21 +210,12 @@
             <h3>Recent System Logs</h3>
             <table class="t">
               <thead><tr><th>Timestamp</th><th>Level</th><th>Message</th></tr></thead>
-              <tbody>
-                ${l.map(x => `
-                  <tr>
-                    <td>${x.at}</td>
-                    <td><b style="color:${x.level==='error'?'var(--bad)':'var(--p)'}">${x.level.toUpperCase()}</b></td>
-                    <td>${x.msg}</td>
-                  </tr>
-                `).join('') || '<tr><td colspan="3">No system logs.</td></tr>'}
-              </tbody>
+              <tbody>${l.map(x => `<tr><td>${esc(x.at)}</td>
+                <td><b style="color:${x.level==='error'?'var(--bad)':'var(--p)'}">${esc(x.level.toUpperCase())}</b></td>
+                <td>${esc(x.msg)}</td></tr>`).join('') || '<tr><td colspan="3">No system logs.</td></tr>'}</tbody>
             </table>
-          </div>
-        `);
-      } catch (e) {
-        toast(e.message);
-      }
+          </div>`);
+      } catch (e) { toast(e.message); }
     }
 
     dash().catch(() => location = '/index.html');

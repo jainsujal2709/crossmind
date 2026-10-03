@@ -1,5 +1,5 @@
 import datetime as dt
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, ForeignKey, JSON, Text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, DateTime, ForeignKey, JSON, Text, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 import config
 
@@ -14,14 +14,32 @@ Base = declarative_base()
 now = lambda: dt.datetime.utcnow()
 
 class User(Base):
+    """One table for every account. `role` is student | teacher | admin.
+
+    Students self-register. Teachers can ONLY be created by an admin.
+    Profile columns below are optional and role-specific.
+    """
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
     email = Column(String, unique=True, index=True)
     name = Column(String)
     pw = Column(String)
-    role = Column(String, default="student") # student, teacher, admin
+    role = Column(String, default="student", index=True) # student, teacher, admin
     active = Column(Boolean, default=True)
     created = Column(DateTime, default=now)
+    # --- common profile ---
+    phone = Column(String, default="")
+    last_login = Column(DateTime, nullable=True)
+    updated = Column(DateTime, nullable=True)
+    created_by = Column(Integer, nullable=True)      # admin id that created it (NULL = self-registered)
+    # --- teacher profile ---
+    employee_id = Column(String, default="")
+    department = Column(String, default="")
+    subject = Column(String, default="")
+    # --- student profile ---
+    roll_no = Column(String, default="")
+    course = Column(String, default="")
+    division = Column(String, default="")
 
 class Doc(Base):
     __tablename__ = "documents"
@@ -99,3 +117,20 @@ class Log(Base):
     level = Column(String)
     msg = Column(Text)
     created = Column(DateTime, default=now)
+
+
+def migrate():
+    """Create missing tables and add any missing columns to existing tables
+    (works on SQLite and PostgreSQL) so old databases upgrade without data loss."""
+    Base.metadata.create_all(engine)
+    insp = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        if not insp.has_table(table.name):
+            continue
+        have = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in have:
+                continue
+            ctype = col.type.compile(engine.dialect)
+            with engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ctype}'))

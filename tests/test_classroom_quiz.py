@@ -1,4 +1,5 @@
 import sys, os
+if os.path.exists("./test_app.db"): os.remove("./test_app.db")  # start from a clean database
 os.environ["DATABASE_URL"] = "sqlite:///./test_app.db"
 os.environ["ADMIN_EMAIL"] = "admin@crossmind.edu"
 os.environ["ADMIN_PASSWORD"] = "AdminSecret123"
@@ -18,13 +19,19 @@ def get_auth_header(email, password):
     return {"Authorization": f"Bearer {token}"}
 
 def test_full_classroom_and_quiz_flow():
-    # 1. Register Teacher
-    t_reg = client.post("/api/auth/register", json={
-        "email": "prof.smith@crossmind.edu",
-        "password": "TeacherPass123",
-        "name": "Prof. Smith",
-        "role": "teacher"
+    # 1. Teachers cannot self-register: the public endpoint must always create a STUDENT
+    attempt = client.post("/api/auth/register", json={
+        "email": "sneaky.teacher@crossmind.edu", "password": "TeacherPass123",
+        "name": "Sneaky", "role": "teacher"
     })
+    assert attempt.status_code == 200 and attempt.json()["role"] == "student"
+
+    # ...so the real teacher account is created by the admin
+    admin_hdr = get_auth_header("admin@crossmind.edu", "AdminSecret123")
+    t_reg = client.post("/api/admin/teachers", json={
+        "email": "prof.smith@crossmind.edu", "password": "TeacherPass123", "name": "Prof. Smith",
+        "department": "Computer Science", "employee_id": "T-001"
+    }, headers=admin_hdr)
     assert t_reg.status_code in (200, 400)
     teacher_hdr = get_auth_header("prof.smith@crossmind.edu", "TeacherPass123")
 

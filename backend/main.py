@@ -1,7 +1,7 @@
-import os, json, datetime as dt, collections, random, string
+import os, io, csv, json, datetime as dt, collections, random, string
 import jwt, bcrypt
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -12,7 +12,7 @@ import re
 import config, parser, nlp, crossword, quiz_generator
 from models import *
 
-Base.metadata.create_all(engine)
+migrate()
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "data", "sample_data")
 
 app = FastAPI(title="CrossMind — AI/NLP Crossword & Classroom Learning Platform")
@@ -72,10 +72,15 @@ def admin(u=Depends(me)):
 
 # Authentication Schemas & Routes
 class Reg(BaseModel):
+    # NOTE: there is intentionally no `role` field. Public sign-up always creates a STUDENT.
+    # Any "role" sent by a client is ignored. Teachers are created by an admin only.
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=6)
     name: str = Field(min_length=1, max_length=60)
-    role: str = "student" # student, teacher, admin
+    phone: str = Field("", max_length=20)
+    roll_no: str = Field("", max_length=30)
+    course: str = Field("", max_length=60)
+    division: str = Field("", max_length=20)
 
 class Login(BaseModel):
     email: str
@@ -83,24 +88,27 @@ class Login(BaseModel):
 
 @app.post("/api/auth/register")
 def register(b: Reg, s=Depends(db)):
-    role = b.role.lower()
-    if role not in ("student", "teacher", "admin"):
-        role = "student"
-    if s.query(User).filter_by(email=b.email.lower()).first():
+    email = b.email.strip().lower()
+    if s.query(User).filter_by(email=email).first():
         raise HTTPException(400, "Email already registered.")
-    user = User(email=b.email.lower(), name=b.name.strip(), pw=hash_pw(b.password), role=role)
+    user = User(
+        email=email, name=b.name.strip(), pw=hash_pw(b.password), role="student", active=True,
+        phone=b.phone.strip(), roll_no=b.roll_no.strip(), course=b.course.strip(), division=b.division.strip(),
+    )
     s.add(user)
     s.commit()
     return {"ok": True, "role": user.role}
 
 @app.post("/api/auth/login")
 def login(b: Login, s=Depends(db)):
-    u = s.query(User).filter_by(email=b.email.lower()).first()
+    u = s.query(User).filter_by(email=b.email.strip().lower()).first()
     if not u or not bcrypt.checkpw(b.password.encode(), u.pw.encode()):
         log(s, "warning", f"Failed login for {b.email}")
         raise HTTPException(401, "Invalid email or password.")
     if not u.active:
         raise HTTPException(403, "This account is disabled.")
+    u.last_login = dt.datetime.utcnow()
+    s.commit()
     tok = jwt.encode(
         {"sub": str(u.id), "role": u.role, "name": u.name, "exp": dt.datetime.utcnow() + dt.timedelta(days=7)},
         config.SECRET_KEY,
@@ -380,6 +388,8 @@ class JoinClassroomSchema(BaseModel):
 
 @app.post("/api/classrooms/join")
 def join_classroom(b: JoinClassroomSchema, u=Depends(me), s=Depends(db)):
+    if u.role != "student":
+        raise HTTPException(403, "Only student accounts can join a classroom.")
     code = b.code.strip().upper()
     c = s.query(Classroom).filter_by(code=code).first()
     if not c:
@@ -969,41 +979,200 @@ def admin_dashboard(a=Depends(admin), s=Depends(db)):
         "avg_quiz_score": round(sum(a.percentage for a in attempts) / len(attempts), 1) if attempts else 0.0
     }
 
+EMAIL_RE = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+PROFILE_FIELDS = ("phone", "employee_id", "department", "subject", "roll_no", "course", "division")
+
+def user_dict(u, s=None, detail=False):
+    d = {
+        "id": u.id, "name": u.name, "email": u.email, "role": u.role, "active": u.active,
+        "phone": u.phone or "", "employee_id": u.employee_id or "", "department": u.department or "",
+        "subject": u.subject or "", "roll_no": u.roll_no or "", "course": u.course or "", "division": u.division or "",
+        "joined": u.created.strftime("%Y-%m-%d") if u.created else "",
+        "last_login": u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "Never",
+        "self_registered": u.created_by is None,
+    }
+    if s is not None:
+        if u.role == "teacher":
+            d["classrooms"] = s.query(Classroom).filter_by(teacher_id=u.id).count()
+            d["quizzes"] = s.query(Quiz).filter_by(teacher_id=u.id).count()
+        elif u.role == "student":
+            d["classrooms"] = s.query(ClassroomMember).filter_by(student_id=u.id).count()
+            d["quizzes"] = s.query(QuizAttempt).filter_by(student_id=u.id).count()
+    return d
+
+def purge_user(s, u):
+    """Delete a user and everything that references them (works for teachers and students)."""
+    if u.role == "teacher":
+        for c in s.query(Classroom).filter_by(teacher_id=u.id).all():
+            for q in s.query(Quiz).filter_by(classroom_id=c.id).all():
+                s.query(QuizAttempt).filter_by(quiz_id=q.id).delete()
+                s.delete(q)
+            s.query(ClassroomMember).filter_by(classroom_id=c.id).delete()
+            s.delete(c)
+        for q in s.query(Quiz).filter_by(teacher_id=u.id).all():
+            s.query(QuizAttempt).filter_by(quiz_id=q.id).delete()
+            s.delete(q)
+    s.query(QuizAttempt).filter_by(student_id=u.id).delete()
+    s.query(ClassroomMember).filter_by(student_id=u.id).delete()
+    s.query(Puzzle).filter_by(user_id=u.id).delete()
+    s.query(Doc).filter_by(user_id=u.id).delete()
+    s.delete(u)
+
+class AdminUserSchema(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    email: str = Field(pattern=EMAIL_RE)
+    password: str = Field(min_length=6)
+    phone: str = Field("", max_length=20)
+    employee_id: str = Field("", max_length=30)
+    department: str = Field("", max_length=80)
+    subject: str = Field("", max_length=80)
+    roll_no: str = Field("", max_length=30)
+    course: str = Field("", max_length=60)
+    division: str = Field("", max_length=20)
+
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=60)
+    email: Optional[str] = Field(None, pattern=EMAIL_RE)
+    password: Optional[str] = Field(None, min_length=6)   # only set to reset the password
+    active: Optional[bool] = None
+    phone: Optional[str] = Field(None, max_length=20)
+    employee_id: Optional[str] = Field(None, max_length=30)
+    department: Optional[str] = Field(None, max_length=80)
+    subject: Optional[str] = Field(None, max_length=80)
+    roll_no: Optional[str] = Field(None, max_length=30)
+    course: Optional[str] = Field(None, max_length=60)
+    division: Optional[str] = Field(None, max_length=20)
+
+def admin_create_user(b, role, a, s):
+    email = b.email.strip().lower()
+    if s.query(User).filter_by(email=email).first():
+        raise HTTPException(400, "A user with this email already exists.")
+    user = User(email=email, name=b.name.strip(), pw=hash_pw(b.password), role=role, active=True, created_by=a.id)
+    for f in PROFILE_FIELDS:
+        setattr(user, f, (getattr(b, f, "") or "").strip())
+    s.add(user)
+    s.commit()
+    log(s, "info", f"Admin {a.email} created {role} {user.email}")
+    return {"ok": True, **user_dict(user, s)}
+
+@app.post("/api/admin/teachers")
+def admin_create_teacher(b: AdminUserSchema, a=Depends(admin), s=Depends(db)):
+    return admin_create_user(b, "teacher", a, s)
+
+@app.post("/api/admin/students")
+def admin_create_student(b: AdminUserSchema, a=Depends(admin), s=Depends(db)):
+    return admin_create_user(b, "student", a, s)
+
 @app.get("/api/admin/users")
-def admin_list_users(a=Depends(admin), s=Depends(db)):
-    return [
-        {
-            "id": u.id,
-            "name": u.name,
-            "email": u.email,
-            "role": u.role,
-            "active": u.active,
-            "joined": u.created.strftime("%Y-%m-%d")
-        }
-        for u in s.query(User).all()
-    ]
+def admin_list_users(role: Optional[str] = None, q: str = "", a=Depends(admin), s=Depends(db)):
+    qry = s.query(User)
+    if role in ("student", "teacher", "admin"):
+        qry = qry.filter(User.role == role)
+    if q.strip():
+        like = f"%{q.strip().lower()}%"
+        from sqlalchemy import or_, func
+        qry = qry.filter(or_(func.lower(User.name).like(like), func.lower(User.email).like(like),
+                             func.lower(User.roll_no).like(like), func.lower(User.employee_id).like(like),
+                             func.lower(User.department).like(like)))
+    return [user_dict(u, s) for u in qry.order_by(User.id.desc()).all()]
+
+@app.get("/api/admin/users/{id}")
+def admin_get_user(id: int, a=Depends(admin), s=Depends(db)):
+    u = s.get(User, id)
+    if not u:
+        raise HTTPException(404, "User not found.")
+    return user_dict(u, s)
+
+@app.put("/api/admin/users/{id}")
+def admin_update_user(id: int, b: AdminUserUpdate, a=Depends(admin), s=Depends(db)):
+    u = s.get(User, id)
+    if not u:
+        raise HTTPException(404, "User not found.")
+    if u.role == "admin" and u.id != a.id:
+        raise HTTPException(403, "Other admin accounts cannot be edited here.")
+    if b.active is False and u.id == a.id:
+        raise HTTPException(400, "You cannot disable your own account.")
+    if b.email is not None:
+        email = b.email.strip().lower()
+        if email != u.email and s.query(User).filter_by(email=email).first():
+            raise HTTPException(400, "Another user already uses this email.")
+        u.email = email
+    if b.name is not None:
+        u.name = b.name.strip()
+    if b.password:
+        u.pw = hash_pw(b.password)
+    if b.active is not None:
+        u.active = b.active
+    for f in PROFILE_FIELDS:
+        v = getattr(b, f)
+        if v is not None:
+            setattr(u, f, v.strip())
+    u.updated = dt.datetime.utcnow()
+    s.commit()
+    log(s, "info", f"Admin {a.email} updated {u.role} {u.email}")
+    return {"ok": True, **user_dict(u, s)}
 
 @app.post("/api/admin/users/{id}/toggle")
 def admin_toggle_user(id: int, a=Depends(admin), s=Depends(db)):
     u = s.get(User, id)
-    if not u or u.id == a.id:
+    if not u or u.id == a.id or u.role == "admin":
         raise HTTPException(400, "Operation not allowed.")
     u.active = not u.active
+    u.updated = dt.datetime.utcnow()
     s.commit()
     return {"active": u.active}
 
 @app.delete("/api/admin/users/{id}")
 def admin_delete_user(id: int, a=Depends(admin), s=Depends(db)):
     u = s.get(User, id)
-    if not u or u.id == a.id:
+    if not u or u.id == a.id or u.role == "admin":
         raise HTTPException(400, "Operation not allowed.")
-    s.query(QuizAttempt).filter_by(student_id=id).delete()
-    s.query(ClassroomMember).filter_by(student_id=id).delete()
-    s.query(Puzzle).filter_by(user_id=id).delete()
-    s.query(Doc).filter_by(user_id=id).delete()
-    s.delete(u)
+    email, role = u.email, u.role
+    purge_user(s, u)
     s.commit()
+    log(s, "info", f"Admin {a.email} deleted {role} {email}")
     return {"ok": True}
+
+CSV_COLS = ["name", "email", "phone", "employee_id", "department", "subject", "roll_no", "course", "division", "active", "joined", "last_login"]
+
+@app.get("/api/admin/export")
+def admin_export(role: str = "teacher", a=Depends(admin), s=Depends(db)):
+    if role not in ("teacher", "student"):
+        raise HTTPException(400, "role must be teacher or student")
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(CSV_COLS)
+    for u in s.query(User).filter_by(role=role).order_by(User.id).all():
+        d = user_dict(u)
+        w.writerow([d[c] for c in CSV_COLS])
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={role}s.csv"})
+
+@app.post("/api/admin/import")
+async def admin_import(role: str = Form("teacher"), file: UploadFile = File(...), a=Depends(admin), s=Depends(db)):
+    """Bulk-create teachers/students from CSV. Columns: name,email,password (+ optional profile columns)."""
+    if role not in ("teacher", "student"):
+        raise HTTPException(400, "role must be teacher or student")
+    raw = (await file.read(config.MAX_BYTES + 1)).decode("utf-8-sig", errors="ignore")
+    created, skipped = 0, []
+    for i, row in enumerate(csv.DictReader(io.StringIO(raw)), start=2):
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        email, name, pw = row.get("email", "").lower(), row.get("name", ""), row.get("password", "")
+        import re as _re
+        if not name or not _re.match(EMAIL_RE, email) or len(pw) < 6:
+            skipped.append(f"row {i}: needs name, valid email, password (6+ chars)")
+            continue
+        if s.query(User).filter_by(email=email).first():
+            skipped.append(f"row {i}: {email} already exists")
+            continue
+        u = User(email=email, name=name, pw=hash_pw(pw), role=role, active=True, created_by=a.id)
+        for f in PROFILE_FIELDS:
+            setattr(u, f, row.get(f, ""))
+        s.add(u)
+        created += 1
+    s.commit()
+    log(s, "info", f"Admin {a.email} imported {created} {role}(s)")
+    return {"created": created, "skipped": skipped}
 
 @app.get("/api/admin/logs")
 def admin_logs(a=Depends(admin), s=Depends(db)):

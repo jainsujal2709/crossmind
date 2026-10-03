@@ -1,4 +1,5 @@
 import sys, os
+if os.path.exists("./test.db"): os.remove("./test.db")  # start from a clean database
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["ADMIN_EMAIL"] = "a@x.io"
 os.environ["ADMIN_PASSWORD"] = "AdminPass123"

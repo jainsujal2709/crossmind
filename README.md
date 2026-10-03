@@ -325,6 +325,33 @@ This allows the Netlify frontend to communicate with the FastAPI backend.
 
 ---
 
+# PART F0 — Teachers, students and the database (NEW)
+
+**Who can sign up?**
+
+| Role | How the account is created |
+|------|----------------------------|
+| Student | Registers themselves on the website (Student Sign Up tab) |
+| Teacher | **Cannot register.** Only the admin creates teachers (Admin console → Teachers → + Add Teacher, or CSV import) |
+| Admin | Created automatically from `ADMIN_EMAIL` / `ADMIN_PASSWORD` |
+
+The public `/api/auth/register` endpoint always creates a *student*, even if someone sends `role: teacher` by hand.
+
+**Admin console** (`/admin.html`, admin login only) has separate **Teachers** and **Students** tabs where you can:
+add, edit (name, email, phone, department, employee id, roll no, course, division…), reset a password,
+enable/disable (blocks login), delete, search, export to CSV and bulk-import from CSV.
+Deleting a teacher also removes their classrooms, quizzes and the students' results in them (you get a confirmation first).
+
+**Database tables** are documented in `database/schema.sql`. Everything is stored in the `users` table
+(`role` = student / teacher / admin) plus `classrooms`, `classroom_members`, `quizzes`, `quiz_attempts`,
+`crosswords`, `documents`, `logs`. Tables and new columns are created/upgraded automatically on startup,
+so an existing database keeps all its data. Passwords are stored only as bcrypt hashes.
+
+CSV import format: `name,email,password` plus optional `phone,employee_id,department,subject` (teachers) or
+`phone,roll_no,course,division` (students).
+
+---
+
 # PART F — Admin login
 
 The admin account is created automatically when the backend starts if these variables are present:

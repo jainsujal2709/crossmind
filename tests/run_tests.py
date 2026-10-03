@@ -1,18 +1,12 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+"""Runs every test file in its own process (each file configures its own database/admin via env vars)."""
+import sys, os, subprocess
 
+here = os.path.dirname(os.path.abspath(__file__))
 print("Running CrossMind Test Suite...")
-from test_classroom_quiz import test_full_classroom_and_quiz_flow
-from test_api import test_flow
-
-try:
-    test_full_classroom_and_quiz_flow()
-    print("[SUCCESS] Classroom & Quiz Flow Test Passed!")
-    test_flow()
-    print("[SUCCESS] General API & Crossword Flow Test Passed!")
-    print("\nALL TESTS PASSED SUCCESSFULLY!")
-except Exception as e:
-    print(f"\n[FAILURE] Test Failed: {type(e).__name__}: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
+failed = False
+for f in ("test_crossword.py", "test_classroom_quiz.py", "test_api.py", "test_user_management.py"):
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", os.path.join(here, f)], cwd=os.path.join(here, ".."))
+    print(("[SUCCESS] " if r.returncode == 0 else "[FAILURE] ") + f)
+    failed |= r.returncode != 0
+print("\nALL TESTS PASSED SUCCESSFULLY!" if not failed else "\nSOME TESTS FAILED")
+sys.exit(1 if failed else 0)
