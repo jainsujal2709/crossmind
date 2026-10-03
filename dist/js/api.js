@@ -38,7 +38,9 @@ const API = {
       location = '/index.html';
     }
     if (!r.ok) {
-      throw new Error(typeof d.detail === 'string' ? d.detail : 'Please check your input.');
+      if (typeof d.detail === 'string') throw new Error(d.detail);
+      if (r.status >= 500) throw new Error('Server error (' + r.status + '). The backend may be misconfigured - open /api/health to check.');
+      throw new Error('Please check your input.');
     }
     return d;
   }

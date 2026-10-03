@@ -12,7 +12,6 @@ import re
 import config, parser, nlp, crossword, quiz_generator
 from models import *
 
-migrate()
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "data", "sample_data")
 
 app = FastAPI(title="CrossMind — AI/NLP Crossword & Classroom Learning Platform")
@@ -27,12 +26,53 @@ def log(s, level, msg):
     except Exception:
         pass
 
-# Seed default admin if configured
-with Session() as s:
-    if config.ADMIN_EMAIL and config.ADMIN_PASSWORD:
-        if not s.query(User).filter_by(email=config.ADMIN_EMAIL.lower()).first():
-            s.add(User(email=config.ADMIN_EMAIL.lower(), name="System Admin", pw=hash_pw(config.ADMIN_PASSWORD), role="admin"))
-            s.commit()
+import threading, sys
+_init_lock = threading.Lock()
+_ready = False
+_init_error = DB_ERROR
+
+def _redact(m):
+    return re.sub(r"postgres\w*(\+\w+)?://\S+", "<db-url>", str(m))
+
+def init_db():
+    """Create/upgrade tables and seed the admin. Safe to call repeatedly; retried until it succeeds
+    (a sleeping Neon database can fail the very first connection)."""
+    global _ready, _init_error
+    if _ready:
+        return True
+    if DB_ERROR:
+        _init_error = DB_ERROR
+        return False
+    with _init_lock:
+        if _ready:
+            return True
+        try:
+            migrate()
+            with Session() as s:
+                if config.ADMIN_EMAIL and config.ADMIN_PASSWORD:
+                    if not s.query(User).filter_by(email=config.ADMIN_EMAIL.strip().lower()).first():
+                        s.add(User(email=config.ADMIN_EMAIL.strip().lower(), name="System Admin",
+                                   pw=hash_pw(config.ADMIN_PASSWORD), role="admin"))
+                        s.commit()
+            _ready, _init_error = True, None
+        except Exception as e:
+            _init_error = type(e).__name__
+            print("DB init failed:", type(e).__name__, _redact(e), file=sys.stderr)
+        return _ready
+
+init_db()
+
+@app.middleware("http")
+async def db_guard(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.url.path != "/api/health" and not _ready and not init_db():
+        return JSONResponse({"detail": f"Database is not reachable ({_init_error}). Check DATABASE_URL in your hosting settings, then see /api/health."}, 503)
+    return await call_next(request)
+
+@app.get("/api/health")
+def health():
+    return {"ok": _ready, "database": "connected" if _ready else "error", "error_type": _init_error,
+            "admin_configured": bool(config.ADMIN_EMAIL and config.ADMIN_PASSWORD),
+            "secret_key_set": config.SECRET_KEY != "dev-secret-change-me"}
 
 @app.exception_handler(Exception)
 async def err_handler(request: Request, e: Exception):

@@ -3,11 +3,19 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, D
 from sqlalchemy.orm import declarative_base, sessionmaker
 import config
 
-engine = create_engine(
-    config.DATABASE_URL,
-    connect_args={"check_same_thread": False} if config.DATABASE_URL.startswith("sqlite") else {},
-    pool_pre_ping=True
-)
+DB_ERROR = None
+def _make_engine(url):
+    return create_engine(
+        url,
+        connect_args={"check_same_thread": False} if url.startswith("sqlite") else {"connect_timeout": 15},
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+try:
+    engine = _make_engine(config.DATABASE_URL)
+except Exception as e:                      # e.g. unparseable DATABASE_URL: stay alive, report via /api/health
+    DB_ERROR = type(e).__name__
+    engine = _make_engine("sqlite://")      # throw-away placeholder; every /api call is refused with 503 below
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
