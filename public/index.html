@@ -11,52 +11,13 @@
   <nav class="glass-nav">
     <a class="brand" href="/">CROSSMIND</a>
     <div class="nav-links">
-      <a href="#benefits">Features</a>
-      <a href="#how">How it Works</a>
       <a href="#auth" class="btn alt" onclick="showAuthModal('login')">Student Login</a>
       <a href="#auth" class="btn primary" onclick="showAuthModal('login')">Teacher Login</a>
       <button class="btn alt" onclick="theme()" aria-label="Toggle theme">◐ Theme</button>
     </div>
   </nav>
 
-  <header class="hero">
-    <div class="hero-badge">🚀 Powered by AI & NLP EdTech</div>
-    <h1>Turn your learning material into an <span class="gradient-text">interactive learning experience</span>.</h1>
-    <p class="hero-subtitle">CrossMind automatically converts PDFs, slides, documents, and notes into AI crosswords, classroom quizzes, and live gamified leaderboards.</p>
-    
-    <div class="hero-actions">
-      <button class="btn primary lg" onclick="showAuthModal('reg', '#create')">🎮 Create Crossword</button>
-      <button class="btn accent lg" onclick="showAuthModal('reg', '#join')">🔑 Join Classroom</button>
-      <button class="btn alt lg" onclick="showAuthModal('login')">👨‍🏫 Teacher Login</button>
-    </div>
-
-    <div class="hero-demo-grid">
-      <table class="xw demo-table" id="demo" aria-hidden="true"></table>
-    </div>
-  </header>
-
-  <main class="container">
-    <section id="benefits" class="benefits-section">
-      <h2 class="section-title">Why Students & Teachers Love CrossMind</h2>
-      <div class="grid cols-3">
-        <div class="card benefit-card">
-          <div class="benefit-icon">📚</div>
-          <h3>Learn</h3>
-          <p>Convert PDFs, PPTs, DOCX, Excel, notes, and topics into interactive learning activities effortlessly.</p>
-        </div>
-        <div class="card benefit-card">
-          <div class="benefit-icon">🧩</div>
-          <h3>Practice</h3>
-          <p>Solve AI-generated crosswords and adaptive quizzes with real-time hints and concept explanations.</p>
-        </div>
-        <div class="card benefit-card">
-          <div class="benefit-icon">🏆</div>
-          <h3>Compete</h3>
-          <p>Join virtual classrooms using unique codes and race on real-time live leaderboards with your peers.</p>
-        </div>
-      </div>
-    </section>
-
+  <main class="container login-wrap">
     <!-- Auth Modal / Card -->
     <section id="auth" class="auth-section">
       <div class="card auth-card">
@@ -108,53 +69,11 @@
       </div>
     </section>
 
-    <section id="how" class="how-section">
-      <h2 class="section-title">How CrossMind Works</h2>
-      <div class="grid cols-3">
-        <div class="card step-card">
-          <div class="step-num">1</div>
-          <h3>Upload & Parse</h3>
-          <p>Drop PDF, PPTX, DOCX, CSV, Excel, TXT notes or record topic prompts using voice dictation.</p>
-        </div>
-        <div class="card step-card">
-          <div class="step-num">2</div>
-          <h3>AI/NLP Pipeline</h3>
-          <p>Extract core concepts, key definitions, difficulty scaling, and question distractors automatically.</p>
-        </div>
-        <div class="card step-card">
-          <div class="step-num">3</div>
-          <h3>Compete & Score</h3>
-          <p>Attend live classroom quizzes, track automatic score calculations, and climb the live leaderboards.</p>
-        </div>
-      </div>
-    </section>
   </main>
 
-  <footer class="footer mu">
-    <p><strong>CrossMind</strong> — Production-Ready AI/NLP EdTech Platform</p>
-  </footer>
-
   <script src="js/api.js"></script>
+  <script src="js/bg.js"></script>
   <script>
-    // Animated Crossword Demo
-    const demoWords = ['CROSSMIND', 'LEARN', 'QUIZ', 'AI'];
-    const demoGrid = [
-      ['C','R','O','S','S','M','I','N','D'],
-      ['','','','O','','','','',''],
-      ['','','L','E','A','R','N','',''],
-      ['','','','Q','U','I','Z','','']
-    ];
-    let demoHtml = '';
-    demoGrid.forEach(row => {
-      demoHtml += '<tr>';
-      row.forEach((cell, idx) => {
-        if(cell) demoHtml += `<td class="c" style="animation: pop 0.4s ${idx * 0.1}s ease both">${cell}</td>`;
-        else demoHtml += '<td></td>';
-      });
-      demoHtml += '</tr>';
-    });
-    $('#demo').innerHTML = demoHtml;
-
     let targetRedirect = '';
 
     function showAuthModal(tab, redirect) {

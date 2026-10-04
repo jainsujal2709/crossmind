@@ -314,3 +314,26 @@ table.t tr:hover { background: rgba(0, 0, 0, 0.02); }
 .auth-tab.active { color: var(--p); border-bottom-color: var(--p); }
 
 .footer { text-align: center; padding: 40px 20px; border-top: 1px solid var(--bd); margin-top: 60px; }
+
+/* Clean login page: portal centred on screen */
+.login-wrap { min-height: calc(100vh - 76px); display: flex; align-items: center; justify-content: center; margin: 0 auto; }
+.login-wrap .auth-section { width: 100%; max-width: 480px; margin: 24px auto; }
+.login-wrap .auth-card { margin-bottom: 0; }
+
+/* Header fits small screens (buttons wrap onto a second row instead of being cut off) */
+@media (max-width: 640px) {
+  nav.glass-nav { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+  nav .nav-links { margin-left: 0; width: 100%; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+  nav .nav-links .btn { padding: 8px 12px; font-size: 14px; white-space: nowrap; }
+  .login-wrap { min-height: calc(100vh - 110px); }
+}
+
+/* Phones: keep the page at normal size (no zooming out). Wide content scrolls inside its own card
+   instead of stretching the whole page. Desktop is unchanged. */
+@media (max-width: 640px) {
+  .container { padding: 0 14px; margin: 16px auto; }
+  .card { padding: 18px; overflow-x: auto; }
+  img, svg, video { max-width: 100%; height: auto; }
+  h1 { font-size: 24px; }
+  .stat { font-size: 30px; }
+}
