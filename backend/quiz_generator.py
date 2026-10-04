@@ -9,7 +9,12 @@ def generate_quiz_questions(segs, topic="General Study Material", difficulty="me
     
     concepts_list = nlp.concepts(segs, top=80)
     concept_terms = [c["term"] for c in concepts_list]
-    all_sentences = list(nlp.sentences(segs))
+    # Unique sentences only: lecture PDFs repeat titles/bullets/footers on many pages.
+    all_sentences, _seen = [], set()
+    for sent_, src_ in nlp.sentences(segs):
+        if sent_.lower() not in _seen:
+            _seen.add(sent_.lower())
+            all_sentences.append((sent_, src_))
     
     questions = []
     used_sentences = set()
@@ -113,8 +118,11 @@ def generate_quiz_questions(segs, topic="General Study Material", difficulty="me
             break
 
     # If we need more questions to reach requested count, generate fallback MCQs from sentences
-    while len(questions) < count and len(all_sentences) > len(used_sentences):
-        sent, src = [s for s in all_sentences if s[0] not in used_sentences][0]
+    for sent, src in all_sentences:
+        if len(questions) >= count:
+            break
+        if sent in used_sentences:
+            continue
         used_sentences.add(sent)
         words = [w for w in re.findall(r"[A-Za-z]{5,12}", sent) if w.lower() not in nlp.STOP]
         if not words:

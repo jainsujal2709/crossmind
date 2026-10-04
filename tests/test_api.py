@@ -30,15 +30,26 @@ def test_flow():
     # Admin can access admin users endpoint
     assert c.get("/api/admin/users", headers=admin_hdr).status_code == 200
 
-    # Analyze document & generate crossword
-    a = c.post("/api/documents/analyze", data={"topic": "machine learning"}, headers=student_hdr).json()
+    # Students can NOT upload documents or use crosswords (teachers/admin only)
+    assert c.post("/api/documents/analyze", data={"topic": "machine learning"}, headers=student_hdr).status_code == 403
+    assert c.post("/api/crosswords/generate", json={"doc_id": 1, "difficulty": "easy", "count": 8}, headers=student_hdr).status_code == 403
+    assert c.get("/api/crosswords", headers=student_hdr).status_code == 403
+
+    # A teacher (created by the admin) can analyze a document & generate a crossword
+    c.post("/api/admin/teachers", json={"email": "t@x.io", "password": "teachpass1", "name": "T"}, headers=admin_hdr)
+    teacher_hdr = get_token("t@x.io", "teachpass1")
+    a = c.post("/api/documents/analyze", data={"topic": "machine learning"}, headers=teacher_hdr).json()
     assert "doc_id" in a
 
-    p = c.post("/api/crosswords/generate", json={"doc_id": a["doc_id"], "difficulty": "easy", "count": 8}, headers=student_hdr).json()
+    p = c.post("/api/crosswords/generate", json={"doc_id": a["doc_id"], "difficulty": "easy", "count": 8}, headers=teacher_hdr).json()
     assert "id" in p
     assert "clues" in p
     assert "answer" not in p["clues"][0]
 
     # Submit crossword
-    r = c.post(f"/api/crosswords/{p['id']}/submit", json={"answers": {}, "secs": 5}, headers=student_hdr).json()
+    r = c.post(f"/api/crosswords/{p['id']}/submit", json={"answers": {}, "secs": 5}, headers=teacher_hdr).json()
     assert r["skipped"] == r["total"]
+
+    # Student performance endpoint works with no quizzes taken (real data, not placeholders)
+    perf = c.get("/api/student/performance", headers=student_hdr).json()
+    assert perf["quizzes_completed"] == 0 and perf["strong_topics"] == [] and perf["classrooms_joined"] == 0

@@ -21,6 +21,13 @@ function route() {
 
   const role = localStorage.role || 'student';
 
+  // Students can only join classrooms, take quizzes and see their own results.
+  const STUDENT_BLOCKED = ['create-classroom', 'create-quiz', 'analytics', 'create-crossword', 'play-crossword', 'history'];
+  if (role === 'student' && STUDENT_BLOCKED.includes(view)) {
+    location.hash = 'dashboard';
+    return;
+  }
+
   if (view === 'dashboard') {
     if (role === 'teacher') teacherDash();
     else studentDash();
@@ -61,13 +68,10 @@ route();
 // Student Dashboard View
 async function studentDash() {
   try {
-    const [crosswords, classrooms, perf] = await Promise.all([
-      API.f('/crosswords'),
+    const [classrooms, perf] = await Promise.all([
       API.f('/classrooms'),
       API.f('/student/performance')
     ]);
-
-    const completedCw = crosswords.filter(x => x.done);
 
     H(`
       <div class="dashboard-header">
@@ -76,6 +80,10 @@ async function studentDash() {
       </div>
 
       <div class="grid cols-4">
+        <div class="card">
+          <div class="stat">${classrooms.length}</div>
+          <div class="mu">Classrooms Joined</div>
+        </div>
         <div class="card">
           <div class="stat">${perf.quizzes_completed}</div>
           <div class="mu">Quizzes Completed</div>
@@ -88,21 +96,16 @@ async function studentDash() {
           <div class="stat">${perf.best_score}%</div>
           <div class="mu">Best Quiz Score</div>
         </div>
-        <div class="card">
-          <div class="stat">#${perf.quizzes_completed ? '3' : '—'}</div>
-          <div class="mu">Overall Class Rank</div>
-        </div>
       </div>
 
       <div class="side" style="margin: 20px 0;">
         <a class="btn primary lg" href="#join-classroom">🔑 Join Classroom</a>
-        <a class="btn accent lg" href="#create-crossword">🧩 Generate Crossword</a>
         <a class="btn alt lg" href="#performance">📊 View My Performance</a>
       </div>
 
       <div class="grid cols-2">
         <div class="card">
-          <h3>Active Classrooms (${classrooms.length})</h3>
+          <h3>My Classrooms (${classrooms.length})</h3>
           ${classrooms.length ? `
             <table class="t">
               <thead><tr><th>Classroom</th><th>Teacher</th><th>Students</th><th>Action</th></tr></thead>
@@ -121,22 +124,22 @@ async function studentDash() {
         </div>
 
         <div class="card">
-          <h3>Recent Crossword Puzzles</h3>
-          ${crosswords.length ? `
+          <h3>Recent Quiz Results</h3>
+          ${perf.history.length ? `
             <table class="t">
-              <thead><tr><th>Topic</th><th>Difficulty</th><th>Score</th><th>Action</th></tr></thead>
+              <thead><tr><th>Quiz</th><th>Classroom</th><th>Score</th><th>Date</th></tr></thead>
               <tbody>
-                ${crosswords.slice(0, 5).map(x => `
+                ${perf.history.slice(0, 5).map(h => `
                   <tr>
-                    <td><b>${esc(x.title)}</b></td>
-                    <td><span class="tag ${x.difficulty}">${x.difficulty.toUpperCase()}</span></td>
-                    <td>${x.score !== null ? x.score + '%' : 'In Progress'}</td>
-                    <td><a class="btn primary" href="#play-crossword/${x.id}">Play</a></td>
+                    <td><b>${esc(h.quiz_title)}</b></td>
+                    <td>${esc(h.classroom_name)}</td>
+                    <td><b>${h.score_percentage}%</b> (${h.correct}/${h.total})</td>
+                    <td>${esc(h.date)}</td>
                   </tr>
                 `).join('')}
               </tbody>
             </table>
-          ` : emptyCard('No crosswords generated yet.', '<a class="btn accent" href="#create-crossword">Generate Crossword</a>')}
+          ` : emptyCard('No quizzes taken yet. Join a classroom and wait for your teacher to start a quiz.')}
         </div>
       </div>
     `);
@@ -526,6 +529,11 @@ function startVoiceInput(targetSelector) {
 }
 
 async function generateQuizQuestions() {
+  const hasFiles = $('#qz-fi').files.length > 0;
+  const hasText = $('#qz-tx').value.trim().length > 0;
+  if (!hasFiles && !hasText && !$('#qz-topic').value.trim()) return toast('Upload a file, paste some notes, or enter a topic first.');
+  const sizeErr = tooBig($('#qz-fi').files);
+  if (sizeErr) return toast(sizeErr);
   toast('Analyzing material... Generating questions...');
   $('#qz-generated-preview').innerHTML = emptyCard('AI is extracting key concepts and generating questions...');
 
@@ -536,7 +544,7 @@ async function generateQuizQuestions() {
 
   try {
     let docId = null;
-    if ($('#qz-fi').files.length || $('#qz-tx').value.strip()) {
+    if (hasFiles || hasText) {
       const docRes = await API.f('/documents/analyze', { method: 'POST', body: f });
       docId = docRes.doc_id;
     }
@@ -658,12 +666,14 @@ async function playQuizView(quizId) {
           <h3>Question Review & Learning Explanations</h3>
           ${q.questions.map((item, idx) => {
             const userAns = att.answers[item.id];
-            const isCorrect = String(userAns).strip().upper() === String(item.answer).strip().upper();
+            // Same rule as the server: case-insensitive; multi-select answers compared as sorted lists.
+            const norm = v => Array.isArray(v) ? v.map(x => String(x).trim().toUpperCase()).sort().join('|') : String(v ?? '').trim().toUpperCase();
+            const isCorrect = norm(userAns) !== '' && norm(userAns) === norm(item.answer);
             return `
               <div class="card" style="border-left: 5px solid ${isCorrect ? 'var(--ok)' : 'var(--bad)'}">
                 <b>Q${idx + 1}: ${esc(item.question)}</b>
                 <p>
-                  Your Answer: <b>${esc(userAns || 'Unanswered')}</b><br>
+                  Your Answer: <b>${esc((Array.isArray(userAns) ? userAns.join(', ') : userAns) || 'Unanswered')}</b><br>
                   Correct Answer: <b style="color:var(--ok)">${esc(Array.isArray(item.answer) ? item.answer.join(', ') : item.answer)}</b>
                 </p>
                 <div style="background:var(--bg);padding:10px;border-radius:8px;font-size:14px;" class="mu">
@@ -878,19 +888,19 @@ async function studentPerformanceView() {
           <div class="mu">Quizzes Completed</div>
         </div>
         <div class="card">
-          <div class="stat">${perf.crosswords_completed}</div>
-          <div class="mu">Crosswords Solved</div>
+          <div class="stat">${perf.classrooms_joined}</div>
+          <div class="mu">Classrooms Joined</div>
         </div>
       </div>
 
       <div class="grid cols-2">
         <div class="card">
           <h3>Strong Topics 💪</h3>
-          ${perf.strong_topics.map(t => `<span class="chip on">${esc(t)}</span>`).join('')}
+          ${perf.strong_topics.length ? perf.strong_topics.map(t => `<span class="chip on">${esc(t)}</span>`).join('') : '<p class="mu">Topics where you score 70% or more will show up here.</p>'}
         </div>
         <div class="card">
           <h3>Needs Practice 🎯</h3>
-          ${perf.needs_practice.map(t => `<span class="chip">${esc(t)}</span>`).join('')}
+          ${perf.needs_practice.length ? perf.needs_practice.map(t => `<span class="chip">${esc(t)}</span>`).join('') : '<p class="mu">Topics where you score below 60% will show up here.</p>'}
         </div>
       </div>
 
@@ -1012,6 +1022,8 @@ function createCrosswordView() {
 }
 
 async function analyzeCrosswordDoc() {
+  const sizeErr = tooBig($('#fi').files);
+  if (sizeErr) return toast(sizeErr);
   const f = new FormData();
   [...$('#fi').files].forEach(x => f.append('files', x));
   f.append('text', $('#tx').value);

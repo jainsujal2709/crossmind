@@ -16,6 +16,12 @@ function toast(m) {
 const rawBase = (window.CROSSMIND_API_URL || '__BACKEND_URL__').replace(/\/$/, '');
 const API_BASE = (rawBase === '__BACKEND_URL__' || !rawBase) ? '' : rawBase;
 
+// Returns an error message if any selected file is over the upload limit (hosting allows ~4 MB per request).
+function tooBig(files) {
+  const big = [...files].find(f => f.size > 4 * 1024 * 1024);
+  return big ? '"' + big.name + '" is ' + (big.size / 1048576).toFixed(1) + ' MB. The limit is 4 MB - please upload a smaller file or split it.' : '';
+}
+
 const API = {
   async f(p, o = {}) {
     const h = {};
@@ -38,6 +44,8 @@ const API = {
       location = '/index.html';
     }
     if (!r.ok) {
+      if (r.status === 413) throw new Error('The file is too large. Please upload a file under 4 MB, or split it into smaller parts.');
+      if (r.status === 504 || r.status === 408) throw new Error('The server took too long. Try a smaller file or fewer pages.');
       if (typeof d.detail === 'string') throw new Error(d.detail);
       if (r.status >= 500) throw new Error('Server error (' + r.status + '). The backend may be misconfigured - open /api/health to check.');
       throw new Error('Please check your input.');
@@ -73,8 +81,6 @@ function renderAppNav(isAdmin = false) {
       <a href="#dashboard">Student Dashboard</a>
       <a href="#join-classroom">Join Classroom</a>
       <a href="#performance">My Performance</a>
-      <a href="#create-crossword">Generate Crossword</a>
-      <a href="#history">History</a>
     `;
   }
 

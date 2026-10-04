@@ -189,7 +189,7 @@ async def analyze_documents(
     files: list[UploadFile] = File(default=[]),
     text: str = Form(""),
     topic: str = Form(""),
-    u=Depends(me),
+    u=Depends(teacher),
     s=Depends(db)
 ):
     segs = []
@@ -221,6 +221,8 @@ async def analyze_documents(
                 "source": f"Generated notes for {topic}"
             })
 
+    if files and not segs:
+        raise HTTPException(422, "No readable text was found in the uploaded file. If it is a scanned or image-only PDF, upload a text-based version or paste the text instead.")
     cs = nlp.concepts(segs) if segs else []
     if len(cs) < 3:
         raise HTTPException(422, "Not enough readable text or concepts found. Please provide more detailed notes.")
@@ -254,7 +256,7 @@ def public_crossword(p, full=False):
     }
 
 @app.post("/api/crosswords/generate")
-def generate_crossword(b: CrosswordGenSchema, u=Depends(me), s=Depends(db)):
+def generate_crossword(b: CrosswordGenSchema, u=Depends(teacher), s=Depends(db)):
     if b.difficulty not in ("easy", "medium", "hard"):
         raise HTTPException(400, "Invalid difficulty")
     d = s.get(Doc, b.doc_id)
@@ -272,19 +274,19 @@ def generate_crossword(b: CrosswordGenSchema, u=Depends(me), s=Depends(db)):
     return public_crossword(p)
 
 @app.get("/api/crosswords")
-def list_crosswords(u=Depends(me), s=Depends(db)):
+def list_crosswords(u=Depends(teacher), s=Depends(db)):
     puzzles = s.query(Puzzle).filter_by(user_id=u.id).order_by(Puzzle.id.desc()).all()
     return [public_crossword(p) for p in puzzles]
 
 @app.get("/api/crosswords/{id}")
-def get_crossword(id: int, u=Depends(me), s=Depends(db)):
+def get_crossword(id: int, u=Depends(teacher), s=Depends(db)):
     p = s.get(Puzzle, id)
     if not p or (p.user_id != u.id and u.role != "admin"):
         raise HTTPException(404, "Crossword not found.")
     return public_crossword(p, full=p.done)
 
 @app.delete("/api/crosswords/{id}")
-def delete_crossword(id: int, u=Depends(me), s=Depends(db)):
+def delete_crossword(id: int, u=Depends(teacher), s=Depends(db)):
     p = s.get(Puzzle, id)
     if not p or (p.user_id != u.id and u.role != "admin"):
         raise HTTPException(404, "Crossword not found.")
@@ -304,7 +306,7 @@ def grade_crossword(p, answers):
     return res
 
 @app.post("/api/crosswords/{id}/check")
-def check_crossword(id: int, b: CrosswordAns, u=Depends(me), s=Depends(db)):
+def check_crossword(id: int, b: CrosswordAns, u=Depends(teacher), s=Depends(db)):
     p = s.get(Puzzle, id)
     if not p or (p.user_id != u.id and u.role != "admin"):
         raise HTTPException(404, "Crossword not found.")
@@ -315,7 +317,7 @@ class CrosswordHint(BaseModel):
     dir: str
 
 @app.post("/api/crosswords/{id}/hint")
-def hint_crossword(id: int, b: CrosswordHint, u=Depends(me), s=Depends(db)):
+def hint_crossword(id: int, b: CrosswordHint, u=Depends(teacher), s=Depends(db)):
     p = s.get(Puzzle, id)
     if not p or (p.user_id != u.id and u.role != "admin"):
         raise HTTPException(404, "Crossword not found.")
@@ -327,7 +329,7 @@ def hint_crossword(id: int, b: CrosswordHint, u=Depends(me), s=Depends(db)):
     return {"letters": c["answer"][: 1 + (1 if p.difficulty == "easy" else 0)]}
 
 @app.post("/api/crosswords/{id}/submit")
-def submit_crossword(id: int, b: CrosswordAns, u=Depends(me), s=Depends(db)):
+def submit_crossword(id: int, b: CrosswordAns, u=Depends(teacher), s=Depends(db)):
     p = s.get(Puzzle, id)
     if not p or (p.user_id != u.id and u.role != "admin"):
         raise HTTPException(404, "Crossword not found.")
@@ -363,7 +365,7 @@ def submit_crossword(id: int, b: CrosswordAns, u=Depends(me), s=Depends(db)):
     }
 
 @app.get("/api/crosswords/{id}/export", response_class=HTMLResponse)
-def export_crossword(id: int, u=Depends(me), s=Depends(db)):
+def export_crossword(id: int, u=Depends(teacher), s=Depends(db)):
     p = s.get(Puzzle, id)
     if not p or (p.user_id != u.id and u.role != "admin"):
         raise HTTPException(404, "Crossword not found.")
@@ -993,7 +995,6 @@ def teacher_classroom_analytics(id: int, u=Depends(teacher), s=Depends(db)):
 @app.get("/api/student/performance")
 def student_performance_analytics(u=Depends(me), s=Depends(db)):
     attempts = s.query(QuizAttempt).filter_by(student_id=u.id).order_by(QuizAttempt.submitted_at.desc()).all()
-    crosswords = s.query(Puzzle).filter_by(user_id=u.id).all()
 
     total_quizzes = len(attempts)
     avg_score = round(sum(a.percentage for a in attempts) / total_quizzes, 1) if total_quizzes > 0 else 0.0
@@ -1012,13 +1013,22 @@ def student_performance_analytics(u=Depends(me), s=Depends(db)):
             "date": a.submitted_at.strftime("%b %d, %Y")
         })
 
+    by_topic = collections.defaultdict(list)
+    for a_ in attempts:
+        q_ = s.get(Quiz, a_.quiz_id)
+        if q_ and q_.topic:
+            by_topic[q_.topic].append(a_.percentage)
+    topic_avg = {t: sum(v) / len(v) for t, v in by_topic.items()}
+    strong = [t for t, v in sorted(topic_avg.items(), key=lambda x: -x[1]) if v >= 70][:6]
+    weak = [t for t, v in sorted(topic_avg.items(), key=lambda x: x[1]) if v < 60][:6]
+
     return {
         "average_score": avg_score,
         "best_score": best_score,
         "quizzes_completed": total_quizzes,
-        "crosswords_completed": len([cw for cw in crosswords if cw.done]),
-        "strong_topics": ["Data Structures", "Core Concepts", "Algorithms"],
-        "needs_practice": ["Complex Syntax", "Advanced Optimization"],
+        "classrooms_joined": s.query(ClassroomMember).filter_by(student_id=u.id).count(),
+        "strong_topics": strong,
+        "needs_practice": weak,
         "history": history
     }
 

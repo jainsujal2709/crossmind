@@ -1,15 +1,38 @@
-import io, os, csv
+import io, os, csv, re, unicodedata
+
+def clean_text(t):
+    """Make raw PDF/PPT text readable for the NLP step: fix ligatures (fi/fl), rejoin words hyphenated
+    across line breaks, and rejoin sentences that were wrapped over several lines. Short lines
+    (slide bullets, headings) are kept separate."""
+    t = unicodedata.normalize("NFKC", t or "").replace("\u00ad", "")
+    t = re.sub(r"(\w)-[ \t]*\n[ \t]*([a-z])", r"\1\2", t)           # net-\nwork -> network
+    out = []
+    for block in re.split(r"\n\s*\n", t):
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        buf = ""
+        for l in lines:
+            if buf and len(buf) >= 45 and not re.search(r"[.!?:;]$", buf) and not re.match(r"[•●▪○◦\-*–·]|\d+[.)]\s", l):
+                buf += " " + l
+            else:
+                if buf: out.append(buf)
+                buf = l
+        if buf: out.append(buf)
+        out.append("")
+    return "\n".join(out).strip()
 def parse(name, data):
     """Return [{'text','source'}] segments keeping page/slide/sheet/section info."""
     ext = os.path.splitext(name)[1].lower(); out = []
     if ext == ".pdf":
-        import fitz
+        try:
+            import pymupdf as fitz          # current name
+        except ImportError:
+            import fitz                     # older PyMuPDF releases
         for i, p in enumerate(fitz.open(stream=data, filetype="pdf"), 1):
-            out.append({"text": p.get_text(), "source": f"{name} — page {i}"})
+            out.append({"text": clean_text(p.get_text()), "source": f"{name} — page {i}"})
     elif ext == ".pptx":
         from pptx import Presentation
         for i, s in enumerate(Presentation(io.BytesIO(data)).slides, 1):
-            out.append({"text": "\n".join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame), "source": f"{name} — slide {i}"})
+            out.append({"text": clean_text("\n".join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame)), "source": f"{name} — slide {i}"})
     elif ext == ".docx":
         from docx import Document
         sec, buf = "Introduction", []
