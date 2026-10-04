@@ -109,7 +109,7 @@ nav .brand {
   border: 0;
   border-radius: 10px;
   padding: 10px 20px;
-  font: 600 15px inherit;
+  font-weight: 600; font-size: 15px; font-family: inherit;
   cursor: pointer;
   text-decoration: none;
   display: inline-flex;
@@ -274,17 +274,23 @@ td.cur { background: #FDE68A; } td.cur input { color: #000; }
   width: 100%;
   text-align: left;
   padding: 14px 18px;
-  background: var(--bg);
+  background: var(--sf);
+  color: var(--tx);              /* FIX: buttons do not inherit text colour, so options were invisible in dark theme */
+  font-family: inherit;
   border: 2px solid var(--bd);
   border-radius: 12px;
   font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
   cursor: pointer;
   margin-bottom: 10px;
   transition: all 0.15s ease;
 }
-.option-btn:hover { border-color: var(--p); background: rgba(79, 70, 229, 0.04); }
-.option-btn.selected { border-color: var(--p); background: #EEF2FF; font-weight: 600; color: var(--p); }
-[data-theme="dark"] .option-btn.selected { background: #312E81; color: #E0E7FF; }
+.option-btn:hover { border-color: var(--p); background: rgba(79, 70, 229, 0.08); color: var(--tx); }
+.option-btn.selected { border-color: var(--p); background: #EEF2FF; font-weight: 700; color: #3730A3; }
+[data-theme="dark"] .option-btn { background: #1E293B; color: #F1F5F9; border-color: #475569; }
+[data-theme="dark"] .option-btn:hover { background: #334155; color: #FFFFFF; }
+[data-theme="dark"] .option-btn.selected { background: #4338CA; color: #FFFFFF; border-color: #A5B4FC; }
 
 /* Tables */
 table.t { width: 100%; border-collapse: collapse; margin-top: 10px; }
