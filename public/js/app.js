@@ -1,4 +1,4 @@
-// CrossMind — SPA Application Logic
+// CrossMind - SPA Application Logic
 renderAppNav();
 
 const H = h => $('#v').innerHTML = h;
@@ -6,6 +6,14 @@ let CURRENT_DOC = null;
 let QUIZ_TIMER = null;
 let LEADERBOARD_INTERVAL = null;
 let VOICE_RECOGNITION = null;
+// Declared before route() runs, so opening #create-crossword / #play-crossword directly (or refreshing) works.
+let CW_DOC = null;
+let CW_LEVEL = 'medium';
+let PLAY_PUZZLE = null;
+let PLAY_SEL = null;
+let PLAY_DIR = 'across';
+let PLAY_SECS = 0;
+let PLAY_TIMER = null;
 
 const esc = s => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const emptyCard = (msg, btn) => `<div class="card" style="text-align:center;padding:40px 20px"><p class="mu" style="font-size:18px">${msg}</p>${btn || ''}</div>`;
@@ -16,8 +24,8 @@ function route() {
   
   const hash = location.hash.slice(1) || 'dashboard';
   const parts = hash.split('/');
-  const view = parts[0];
-  const param = parts[1];
+  const view = parts[0].split('?')[0];          // '#create-quiz?classroom_id=3' -> 'create-quiz'
+  const param = (parts[1] || '').split('?')[0] || undefined;
 
   const role = localStorage.role || 'student';
 
@@ -75,7 +83,7 @@ async function studentDash() {
 
     H(`
       <div class="dashboard-header">
-        <h1>Hello, ${esc(localStorage.name)}! 👋</h1>
+        <h1>Welcome, ${esc(localStorage.name)}</h1>
         <p class="mu">Welcome to your CrossMind Student Dashboard.</p>
       </div>
 
@@ -99,8 +107,8 @@ async function studentDash() {
       </div>
 
       <div class="side" style="margin: 20px 0;">
-        <a class="btn primary lg" href="#join-classroom">🔑 Join Classroom</a>
-        <a class="btn alt lg" href="#performance">📊 View My Performance</a>
+        <a class="btn primary lg" href="#join-classroom"> Join Classroom</a>
+        <a class="btn alt lg" href="#performance"> View My Performance</a>
       </div>
 
       <div class="grid cols-2">
@@ -157,8 +165,8 @@ async function teacherDash() {
 
     H(`
       <div class="dashboard-header">
-        <h1>Teacher Command Center 👨‍🏫</h1>
-        <p class="mu">Manage your classrooms, generate AI quizzes, and monitor live leaderboards.</p>
+        <h1>Teacher Command Center</h1>
+        <p class="mu">Manage your classrooms, generate quizzes, and monitor live leaderboards.</p>
       </div>
 
       <div class="grid cols-4">
@@ -181,9 +189,9 @@ async function teacherDash() {
       </div>
 
       <div class="side" style="margin: 20px 0;">
-        <a class="btn primary lg" href="#create-classroom">➕ Create Classroom</a>
-        <a class="btn accent lg" href="#create-quiz">📝 Create Classroom Quiz</a>
-        <a class="btn alt lg" href="#create-crossword">🧩 Generate Crossword</a>
+        <a class="btn primary lg" href="#create-classroom"> Create Classroom</a>
+        <a class="btn accent lg" href="#create-quiz"> Create Classroom Quiz</a>
+        <a class="btn alt lg" href="#create-crossword"> Generate Crossword</a>
       </div>
 
       <div class="card">
@@ -198,11 +206,11 @@ async function teacherDash() {
                   <td>${esc(c.subject)} - Div ${esc(c.division)}</td>
                   <td>
                     <span class="code-badge" style="font-size:16px;padding:4px 10px;" onclick="copyText('${c.code}')" title="Click to copy">
-                      ${c.code} 📋
-                    </span>
+                      ${c.code} <small>Copy</small>
+</span>
                   </td>
                   <td>${c.student_count} students</td>
-                  <td>${c.quiz_count} quizzes</td>
+                  <td>${c.quiz_count} ${c.quiz_count === 1 ? 'quiz' : 'quizzes'}</td>
                   <td>
                     <a class="btn primary" href="#classroom/${c.id}">Manage</a>
                     <a class="btn alt" href="#analytics/${c.id}">Analytics</a>
@@ -294,7 +302,7 @@ async function submitJoinClassroom() {
 
     $('#join-status').innerHTML = `
       <div class="card" style="background:#DCFCE7;border-color:#86EFAC;color:#15803D;">
-        <h3>Successfully Joined! 🎉</h3>
+        <h3>Joined classroom</h3>
         <p><b>${esc(res.classroom.name)}</b><br>Teacher: ${esc(res.classroom.teacher)} · ${res.classroom.student_count} Students</p>
         <a class="btn primary" href="#classroom/${res.classroom.id}">View Classroom</a>
       </div>
@@ -314,25 +322,25 @@ async function viewClassroom(id) {
     if (c.is_teacher) {
       // Teacher View
       mainContent = `
-        <div class="card" style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(124, 58, 237, 0.08));">
+        <div class="card" >
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
             <div>
               <h2>${esc(c.name)}</h2>
-              <p class="mu">${esc(c.subject)} — Div ${esc(c.division)} · ${c.student_count} Students</p>
+              <p class="mu">${esc(c.subject)} - Div ${esc(c.division)} · ${c.student_count} Students</p>
             </div>
             <div>
               <span class="mu" style="font-size:14px;display:block;margin-bottom:4px;">CLASS CODE</span>
               <span class="code-badge" onclick="copyText('${c.code}')" title="Click to copy code">
-                ${c.code} 📋
-              </span>
+                ${c.code} <small>Copy</small>
+</span>
             </div>
           </div>
         </div>
 
         <div class="side" style="margin: 20px 0;">
-          <a class="btn primary lg" href="#create-quiz?classroom_id=${c.id}">📝 Create Quiz</a>
-          <a class="btn accent lg" href="#create-crossword">🧩 Generate Crossword</a>
-          <a class="btn alt lg" href="#analytics/${c.id}">📊 Class Analytics</a>
+          <a class="btn primary lg" href="#create-quiz?classroom_id=${c.id}"> Create Quiz</a>
+          <a class="btn accent lg" href="#create-crossword"> Generate Crossword</a>
+          <a class="btn alt lg" href="#analytics/${c.id}"> Class Analytics</a>
         </div>
 
         <div class="card">
@@ -347,7 +355,7 @@ async function viewClassroom(id) {
                     <td>${esc(q.topic)} (${q.difficulty.toUpperCase()})</td>
                     <td>${q.question_count} Qs · ${q.time_limit} mins</td>
                     <td>
-                      ${q.is_active ? '<span class="tag active">● LIVE NOW</span>' : '<span class="tag pending">READY</span>'}
+                      ${q.is_active ? '<span class="tag active">LIVE NOW</span>' : '<span class="tag pending">READY</span>'}
                     </td>
                     <td>
                       ${q.is_active ? `
@@ -388,7 +396,7 @@ async function viewClassroom(id) {
       mainContent = `
         <div class="card">
           <h2>${esc(c.name)}</h2>
-          <p class="mu">${esc(c.subject)} — Div ${esc(c.division)} · Teacher: ${esc(c.teacher)} · ${c.student_count} Peers</p>
+          <p class="mu">${esc(c.subject)} - Div ${esc(c.division)} · Teacher: ${esc(c.teacher)} · ${c.student_count} Peers</p>
         </div>
 
         <div class="card">
@@ -403,12 +411,12 @@ async function viewClassroom(id) {
                     <td>${esc(q.topic)}</td>
                     <td>${q.question_count} Qs</td>
                     <td>${q.time_limit} mins</td>
-                    <td>${q.my_score !== null ? q.my_score + '%' : '—'}</td>
+                    <td>${q.my_score !== null ? q.my_score + '%' : '-'}</td>
                     <td>
                       ${q.my_status === 'completed' ? `
                         <a class="btn alt" href="#quiz/${q.id}">Review Results</a>
                       ` : (q.is_active ? `
-                        <a class="btn primary" href="#quiz/${q.id}">● START QUIZ NOW</a>
+                        <a class="btn primary" href="#quiz/${q.id}">START QUIZ NOW</a>
                       ` : `
                         <span class="tag pending">Waiting for Teacher</span>
                       `)}
@@ -473,8 +481,8 @@ async function createQuizView() {
 
   H(`
     <div class="card" style="max-width: 800px; margin: 20px auto;">
-      <h2>Create & Assign AI Quiz</h2>
-      <p class="mu">Upload study notes, enter a topic, or dictating material to auto-generate questions using AI/NLP.</p>
+      <h2>Create and Assign Quiz</h2>
+      <p class="mu">Upload study notes, paste text, or enter a topic. Questions are built from the material.</p>
 
       <div class="card" style="background:var(--bg);">
         <h3>1. Target Classroom & Topic</h3>
@@ -490,10 +498,11 @@ async function createQuizView() {
 
         <label>Topic / Subject
           <input id="qz-topic" placeholder="e.g. Relational Algebra, Machine Learning" required>
+          <small class="mu">Topic only: reference text is taken from Wikipedia. For exact course content, upload a file or paste your notes.</small>
         </label>
 
         <div style="margin: 10px 0;">
-          <button class="btn alt" onclick="startVoiceInput('#qz-topic')">🎙 Speak Topic / Prompt</button>
+          <button class="btn alt" onclick="startVoiceInput('#qz-topic')"> Speak Topic / Prompt</button>
         </div>
       </div>
 
@@ -506,7 +515,7 @@ async function createQuizView() {
         <label>Or Paste Learning Excerpt
           <textarea id="qz-tx" rows="4" placeholder="Paste notes or textbook chapter text here..."></textarea>
         </label>
-        <button class="btn accent block" onclick="generateQuizQuestions()">🤖 AI Analyze & Generate Questions</button>
+        <button class="btn accent block" onclick="generateQuizQuestions()">Analyze and Generate Questions</button>
       </div>
 
       <div id="qz-generated-preview"></div>
@@ -535,7 +544,7 @@ async function generateQuizQuestions() {
   const sizeErr = tooBig($('#qz-fi').files);
   if (sizeErr) return toast(sizeErr);
   toast('Analyzing material... Generating questions...');
-  $('#qz-generated-preview').innerHTML = emptyCard('AI is extracting key concepts and generating questions...');
+  $('#qz-generated-preview').innerHTML = emptyCard('Extracting key concepts and generating questions...');
 
   const f = new FormData();
   [...$('#qz-fi').files].forEach(x => f.append('files', x));
@@ -561,6 +570,8 @@ async function generateQuizQuestions() {
     });
 
     window.GENERATED_QUESTIONS = quizRes.questions;
+    window.GENERATED_DRAFT_ID = quizRes.draft_id;
+    toast('Questions generated and saved to History.');
     window.GENERATED_DOC_ID = docId;
 
     $('#qz-generated-preview').innerHTML = `
@@ -588,8 +599,8 @@ async function generateQuizQuestions() {
         </div>
 
         <button class="btn primary lg block" style="margin-top:16px;" onclick="submitAssignQuiz()">
-          🚀 Assign Quiz to Classroom
-        </button>
+           Assign Quiz to Classroom
+</button>
       </div>
     `;
   } catch (e) {
@@ -638,7 +649,7 @@ async function playQuizView(quizId) {
       const att = q.my_attempt;
       H(`
         <div class="card" style="max-width:800px;margin:20px auto;">
-          <h2>Quiz Complete — ${esc(q.title)}</h2>
+          <h2>Quiz Complete: ${esc(q.title)}</h2>
           <p class="mu">${esc(q.topic)} · ${esc(q.classroom_name)}</p>
 
           <div class="grid cols-3" style="margin:20px 0;">
@@ -657,7 +668,7 @@ async function playQuizView(quizId) {
           </div>
 
           <div class="side">
-            <a class="btn primary" href="#live-leaderboard/${q.id}">🏆 View Classroom Leaderboard</a>
+            <a class="btn primary" href="#live-leaderboard/${q.id}"> View Classroom Leaderboard</a>
             <a class="btn alt" href="#classroom/${q.classroom_id}">Return to Classroom</a>
           </div>
         </div>
@@ -677,7 +688,7 @@ async function playQuizView(quizId) {
                   Correct Answer: <b style="color:var(--ok)">${esc(Array.isArray(item.answer) ? item.answer.join(', ') : item.answer)}</b>
                 </p>
                 <div style="background:var(--bg);padding:10px;border-radius:8px;font-size:14px;" class="mu">
-                  💡 <b>Explanation:</b> ${esc(item.explanation)}<br>
+                   <b>Explanation:</b> ${esc(item.explanation)}<br>
                   <small>Source: ${esc(item.source)}</small>
                 </div>
               </div>
@@ -702,15 +713,15 @@ async function playQuizView(quizId) {
       if (item.type === 'true_false' || item.type === 'mcq') {
         inputHtml = item.options.map(opt => `
           <button class="option-btn ${selected === opt ? 'selected' : ''}" onclick="selectOption('${item.id}', '${esc(opt)}')">
-            ${selected === opt ? '🔘' : '⚪'} ${esc(opt)}
-          </button>
+            <span class="mark"></span><span>${esc(opt)}</span>
+</button>
         `).join('');
       } else if (item.type === 'msq') {
         const selList = Array.isArray(selected) ? selected : [];
         inputHtml = item.options.map(opt => `
           <button class="option-btn ${selList.includes(opt) ? 'selected' : ''}" onclick="toggleMsqOption('${item.id}', '${esc(opt)}')">
-            ${selList.includes(opt) ? '☑' : '☐'} ${esc(opt)}
-          </button>
+            <span class="mark box"></span><span>${esc(opt)}</span>
+</button>
         `).join('');
       }
 
@@ -719,8 +730,8 @@ async function playQuizView(quizId) {
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span>Question <b>${currentQIdx + 1}</b> of <b>${q.questions.length}</b></span>
             <span class="code-badge" id="timer-display" style="font-size:18px;padding:4px 12px;">
-              ⏱ Timer: ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, '0')}
-            </span>
+              Timer: ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, '0')}
+</span>
           </div>
 
           <div style="margin: 24px 0;">
@@ -731,14 +742,14 @@ async function playQuizView(quizId) {
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:30px;">
-            <button class="btn alt" ${currentQIdx === 0 ? 'disabled' : ''} onclick="navQuestion(-1)">← Previous</button>
+            <button class="btn alt" ${currentQIdx === 0 ? 'disabled' : ''} onclick="navQuestion(-1)">Previous</button>
             
-            ${item.hint ? `<button class="btn alt" onclick="toast('Hint: ' + '${esc(item.hint)}')">💡 Show Hint</button>` : ''}
+            ${item.hint ? `<button class="btn alt" onclick="toast('Hint: ' + '${esc(item.hint)}')"> Show Hint</button>` : ''}
 
             ${currentQIdx === q.questions.length - 1 ? `
               <button class="btn primary lg" onclick="submitActiveQuiz()">Submit Quiz Now</button>
             ` : `
-              <button class="btn primary" onclick="navQuestion(1)">Next →</button>
+              <button class="btn primary" onclick="navQuestion(1)">Next</button>
             `}
           </div>
         </div>
@@ -788,7 +799,7 @@ async function playQuizView(quizId) {
         window.submitActiveQuiz();
       } else {
         const tDisp = $('#timer-display');
-        if (tDisp) tDisp.textContent = `⏱ Timer: ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, '0')}`;
+        if (tDisp) tDisp.textContent = `Timer: ${Math.floor(secsLeft / 60)}:${String(secsLeft % 60).padStart(2, '0')}`;
       }
     }, 1000);
 
@@ -808,7 +819,7 @@ async function liveLeaderboardView(quizId) {
       const rowsHtml = data.leaderboard.map(item => `
         <tr>
           <td>
-            <span class="rank-badge rank-${item.rank}">${item.rank <= 3 ? ['🥇','🥈','🥉'][item.rank-1] : item.rank}</span>
+            <span class="rank-badge rank-${item.rank}">${item.rank}</span>
           </td>
           <td><b>${esc(item.student_name)}</b></td>
           <td><b>${item.percentage}%</b> (${item.score}/${item.total})</td>
@@ -821,13 +832,13 @@ async function liveLeaderboardView(quizId) {
         <div class="card" style="max-width:900px;margin:20px auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
             <div>
-              <h2>🏆 LIVE CLASSROOM LEADERBOARD</h2>
-              <p class="mu">${esc(data.quiz_title)} — ${esc(data.classroom_name)}</p>
+              <h2> Live Classroom Leaderboard</h2>
+              <p class="mu">${esc(data.quiz_title)} - ${esc(data.classroom_name)}</p>
             </div>
             <div>
               <span class="tag ${data.is_active ? 'active' : 'completed'}">
-                ${data.is_active ? '● LIVE QUIZ IN PROGRESS' : 'QUIZ COMPLETED'}
-              </span>
+                ${data.is_active ? 'LIVE QUIZ IN PROGRESS' : 'QUIZ COMPLETED'}
+</span>
             </div>
           </div>
 
@@ -837,11 +848,11 @@ async function liveLeaderboardView(quizId) {
               <div class="mu">Students Completed</div>
             </div>
             <div class="card" style="text-align:center;">
-              <div class="stat">${data.leaderboard.length ? data.leaderboard[0].percentage + '%' : '—'}</div>
+              <div class="stat">${data.leaderboard.length ? data.leaderboard[0].percentage + '%' : '-'}</div>
               <div class="mu">Top Score</div>
             </div>
             <div class="card" style="text-align:center;">
-              <div class="stat">${data.my_rank ? '#' + data.my_rank.rank : '—'}</div>
+              <div class="stat">${data.my_rank ? '#' + data.my_rank.rank : '-'}</div>
               <div class="mu">My Rank</div>
             </div>
           </div>
@@ -870,7 +881,7 @@ async function studentPerformanceView() {
 
     H(`
       <div class="dashboard-header">
-        <h1>My Learning Analytics 📊</h1>
+        <h1>My Learning Analytics</h1>
         <p class="mu">Track your scores, strength areas, and improvement over time.</p>
       </div>
 
@@ -895,11 +906,11 @@ async function studentPerformanceView() {
 
       <div class="grid cols-2">
         <div class="card">
-          <h3>Strong Topics 💪</h3>
+          <h3>Strong Topics</h3>
           ${perf.strong_topics.length ? perf.strong_topics.map(t => `<span class="chip on">${esc(t)}</span>`).join('') : '<p class="mu">Topics where you score 70% or more will show up here.</p>'}
         </div>
         <div class="card">
-          <h3>Needs Practice 🎯</h3>
+          <h3>Needs Practice</h3>
           ${perf.needs_practice.length ? perf.needs_practice.map(t => `<span class="chip">${esc(t)}</span>`).join('') : '<p class="mu">Topics where you score below 60% will show up here.</p>'}
         </div>
       </div>
@@ -935,7 +946,7 @@ async function teacherAnalyticsView(classId) {
 
     H(`
       <div class="card" style="max-width: 900px; margin: 20px auto;">
-        <h2>Classroom Performance Analytics 📈</h2>
+        <h2>Classroom Performance Analytics</h2>
         
         <div class="grid cols-4" style="margin:20px 0;">
           <div class="card" style="text-align:center;">
@@ -982,13 +993,11 @@ async function teacherAnalyticsView(classId) {
 }
 
 // Individual Crossword Views
-let CW_DOC = null;
-let CW_LEVEL = 'medium';
 
 function createCrosswordView() {
   CW_DOC = null;
   H(`
-    <h1>Generate AI Crossword</h1>
+    <h1>Generate Crossword</h1>
     <div class="card">
       <h3>1. Upload Material or Enter Topic</h3>
       <div id="drop" class="card" style="border-style:dashed;text-align:center">
@@ -998,9 +1007,10 @@ function createCrosswordView() {
 
       <label>Topic / Subject
         <input id="tp" placeholder="e.g. Machine Learning, Computer Networks, DBMS">
+        <small class="mu">Topic only: reference text is taken from Wikipedia. For exact course content, upload a file or paste your notes.</small>
       </label>
 
-      <button class="btn alt" onclick="startVoiceInput('#tp')">🎙 Speak Topic / Material</button>
+      <button class="btn alt" onclick="startVoiceInput('#tp')"> Speak Topic / Material</button>
 
       <label style="margin-top:12px;">Or Paste Notes
         <textarea id="tx" rows="4" placeholder="Paste study notes here..."></textarea>
@@ -1041,7 +1051,7 @@ async function analyzeCrosswordDoc() {
           ${CW_DOC.concepts.map(c => `
             <span class="chip on" tabindex="0" data-t="${c.term}" onclick="this.classList.toggle('on')">
               ${c.term} <small>${c.importance}</small>
-            </span>
+</span>
           `).join('')}
         </div>
       </div>
@@ -1099,11 +1109,6 @@ async function generateCrosswordPuzzle() {
 }
 
 // Interactive Crossword Player
-let PLAY_PUZZLE = null;
-let PLAY_SEL = null;
-let PLAY_DIR = 'across';
-let PLAY_SECS = 0;
-let PLAY_TIMER = null;
 
 async function playCrosswordView(id) {
   PLAY_PUZZLE = await API.f('/crosswords/' + id);
@@ -1122,7 +1127,7 @@ async function playCrosswordView(id) {
       <h1>${esc(PLAY_PUZZLE.title)} <span class="tag active">${PLAY_PUZZLE.difficulty.toUpperCase()}</span></h1>
       <div class="side">
         <b id="cw-timer">Timer: 00:00</b>
-        <button class="btn accent" onclick="useCrosswordHint()">Hint (−2 pts)</button>
+        <button class="btn accent" onclick="useCrosswordHint()">Hint (-2 pts)</button>
         <button class="btn primary" onclick="submitCrosswordPuzzle()">Submit Puzzle</button>
         <button class="btn alt" onclick="exportCrosswordPrint(${id})">Export Printable PDF</button>
       </div>
@@ -1166,7 +1171,7 @@ async function playCrosswordView(id) {
             ${PLAY_PUZZLE.clues.filter(c => c.dir === dir).map(c => `
               <li class="cl" id="clue-${c.n}-${dir}" style="margin-bottom:8px;padding:6px;border-radius:6px;cursor:pointer;" onclick="selectClue(${c.n}, '${dir}')">
                 <b>${c.n}.</b> ${esc(c.clue)}
-                <button class="btn alt" style="padding:2px 8px;font-size:12px;" onclick="event.stopPropagation();speakText('${esc(c.clue)}')">🔊 Listen</button>
+                <button class="btn alt" style="padding:2px 8px;font-size:12px;" onclick="event.stopPropagation();speakText('${esc(c.clue)}')"> Listen</button>
               </li>
             `).join('')}
           </ul>
@@ -1219,7 +1224,7 @@ async function useCrosswordHint() {
       method: 'POST',
       json: { n: matchingClue.n, dir: matchingClue.dir }
     });
-    toast('Hint applied! (−2 points)');
+    toast('Hint applied! (-2 points)');
   } catch (e) {
     toast(e.message);
   }
@@ -1247,7 +1252,7 @@ async function submitCrosswordPuzzle() {
     clearInterval(PLAY_TIMER);
     $('#cw-results').innerHTML = `
       <div class="card" style="margin-top:20px;">
-        <h2>Score: ${res.score}% 🎉</h2>
+        <h2>Score: ${res.score}%</h2>
         <p>Correct: ${res.correct}/${res.total} · Time: ${Math.floor(res.secs/60)}m ${res.secs%60}s</p>
         <button class="btn alt" onclick="exportCrosswordPrint(${PLAY_PUZZLE.id})">Download PDF Export</button>
       </div>
@@ -1267,28 +1272,38 @@ async function exportCrosswordPrint(id) {
 }
 
 // History View
+const fmtDate = iso => new Date(iso + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 async function historyView() {
-  const crosswords = await API.f('/crosswords');
-  H(`
-    <h2>Crossword History</h2>
-    ${crosswords.length ? `
-      <table class="t">
-        <thead><tr><th>Topic</th><th>Difficulty</th><th>Score</th><th>Date</th><th>Action</th></tr></thead>
-        <tbody>
-          ${crosswords.map(x => `
-            <tr>
-              <td><b>${esc(x.title)}</b></td>
-              <td>${x.difficulty.toUpperCase()}</td>
-              <td>${x.score !== null ? x.score + '%' : 'In Progress'}</td>
-              <td>${x.created.slice(0, 10)}</td>
-              <td>
-                <a class="btn primary" href="#play-crossword/${x.id}">Play</a>
-                <button class="btn alt" onclick="exportCrosswordPrint(${x.id})">Export PDF</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    ` : emptyCard('No history yet.')}
-  `);
+  H('<div class="container"><h1>History</h1>' + emptyCard('Loading...') + '</div>');
+  let h, classes = [];
+  try { h = await API.f('/history'); } catch (e) { return H('<div class="container"><h1>History</h1>' + emptyCard(esc(e.message || 'Could not load history.')) + '</div>'); }
+  try { classes = await API.f('/classrooms'); } catch (e) {}
+  const opts = classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const cw = h.crosswords.length ? `<table class="t"><thead><tr><th>Topic</th><th>Level</th><th>Words</th><th>Created</th><th>Actions</th></tr></thead><tbody>${h.crosswords.map(x => `
+    <tr><td><b>${esc(x.title)}</b></td><td>${esc(x.difficulty)}</td><td>${x.words}</td><td>${fmtDate(x.created)}</td>
+    <td><a class="btn primary" href="#play-crossword/${x.id}">Open</a> <button class="btn alt" onclick="exportCrosswordPrint(${x.id})">Export</button> <button class="btn alt" onclick="deleteHistoryItem('crosswords', ${x.id})">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="mu">No crosswords generated yet.</p>';
+  const dr = h.drafts.length ? `<table class="t"><thead><tr><th>Topic</th><th>Level</th><th>Questions</th><th>Created</th><th>Assign to classroom</th></tr></thead><tbody>${h.drafts.map(x => `
+    <tr><td><b>${esc(x.topic)}</b></td><td>${esc(x.difficulty)}</td><td>${x.count}</td><td>${fmtDate(x.created)}</td>
+    <td>${classes.length ? `<select id="hc-${x.id}" style="width:auto;margin:0 6px 0 0">${opts}</select><input id="ht-${x.id}" type="number" min="1" max="180" value="15" style="width:70px;margin:0 6px 0 0" aria-label="Minutes"> min
+    <button class="btn primary" onclick="assignDraft(${x.id})">Assign</button> ` : '<span class="mu">Create a classroom first.</span> '}<button class="btn alt" onclick="deleteHistoryItem('quiz-drafts', ${x.id})">Delete</button></td></tr>`).join('')}</tbody></table>` : '<p class="mu">No generated quizzes waiting to be assigned.</p>';
+  const qz = h.quizzes.length ? `<table class="t"><thead><tr><th>Title</th><th>Classroom</th><th>Questions</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>${h.quizzes.map(x => `
+    <tr><td><b>${esc(x.title)}</b></td><td>${esc(x.classroom)}</td><td>${x.count}</td><td>${x.active ? 'Live' : 'Not live'}</td><td>${fmtDate(x.created)}</td>
+    <td><a class="btn alt" href="#classroom/${x.classroom_id}">Open classroom</a></td></tr>`).join('')}</tbody></table>` : '<p class="mu">No quizzes assigned yet.</p>';
+  H(`<div class="container"><h1>History</h1>
+    <div class="card"><h3>Crosswords</h3>${cw}</div>
+    <div class="card"><h3>Generated quizzes (not yet assigned)</h3>${dr}</div>
+    <div class="card"><h3>Assigned quizzes</h3>${qz}</div></div>`);
+}
+async function deleteHistoryItem(kind, id) {
+  if (!confirm('Delete this item? This cannot be undone.')) return;
+  try { await API.f('/' + kind + '/' + id, { method: 'DELETE' }); toast('Deleted.'); historyView(); } catch (e) { toast(e.message); }
+}
+async function assignDraft(id) {
+  try {
+    const d = await API.f('/quiz-drafts/' + id);
+    await API.f('/quizzes', { method: 'POST', json: {
+      classroom_id: +$('#hc-' + id).value, title: d.topic + ' Quiz', topic: d.topic, difficulty: d.difficulty,
+      time_limit: Math.max(1, +$('#ht-' + id).value || 15), questions: d.questions } });
+    toast('Quiz assigned. Start it from the classroom page.'); historyView();
+  } catch (e) { toast(e.message); }
 }

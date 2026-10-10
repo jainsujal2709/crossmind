@@ -45,7 +45,7 @@ def generate_quiz_questions(segs, topic="General Study Material", difficulty="me
                 # Mutate sent by replacing term with another distractor concept
                 distractors = [c for c in concept_terms if c.upper() != term.upper()]
                 alt_term = random.choice(distractors) if distractors else "incorrect concept"
-                mutated_sent = re.sub(rf"\b{term}\b", alt_term, sent, flags=re.I)
+                mutated_sent = re.sub(rf"\b{term}\b", lambda m: alt_term.capitalize() if m.start() == 0 else alt_term.lower(), sent, flags=re.I)
                 q_text = f"True or False: {mutated_sent}"
                 correct_ans = "False"
                 exp = f"False. The correct concept is '{term}', as stated in the notes: '{sent}'"

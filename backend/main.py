@@ -12,11 +12,12 @@ from urllib.parse import parse_qsl, urlencode
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import config, parser, nlp, crossword, quiz_generator
+import topic as topic_mod
 from models import *
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "data", "sample_data")
 
-app = FastAPI(title="CrossMind — AI/NLP Crossword & Classroom Learning Platform")
+app = FastAPI(title="CrossMind")
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS, allow_methods=["*"], allow_headers=["*"])
 
 hash_pw = lambda p: bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode()
@@ -183,6 +184,40 @@ def login(b: Login, s=Depends(db)):
 def get_profile(u=Depends(me)):
     return {"id": u.id, "email": u.email, "name": u.name, "role": u.role}
 
+
+def topic_segments(topic):
+    try:
+        return topic_mod.fetch_topic_segments(topic)
+    except topic_mod.TopicError as e:
+        raise HTTPException(422, str(e))
+
+@app.get("/api/history")
+def history(u=Depends(teacher), s=Depends(db)):
+    own = lambda M: s.query(M).filter_by(**({"teacher_id": u.id} if M is Quiz else {"user_id": u.id}))
+    cws = [{"id": p.id, "title": p.title, "difficulty": p.difficulty, "words": len((p.data or {}).get("clues", [])),
+            "done": p.done, "score": p.score, "created": p.created.isoformat()} for p in own(Puzzle).order_by(Puzzle.id.desc()).limit(100)]
+    drafts = [{"id": d_.id, "topic": d_.topic, "difficulty": d_.difficulty, "count": len(d_.questions or []), "created": d_.created.isoformat()}
+              for d_ in own(QuizDraft).order_by(QuizDraft.id.desc()).limit(100)]
+    quizzes = [{"id": q.id, "title": q.title, "topic": q.topic, "classroom": (s.get(Classroom, q.classroom_id).name if s.get(Classroom, q.classroom_id) else ""),
+                "classroom_id": q.classroom_id, "count": len(q.questions or []), "active": bool(q.is_active), "created": q.created.isoformat()}
+               for q in own(Quiz).order_by(Quiz.id.desc()).limit(100)]
+    return {"crosswords": cws, "drafts": drafts, "quizzes": quizzes}
+
+@app.get("/api/quiz-drafts/{id}")
+def get_draft(id: int, u=Depends(teacher), s=Depends(db)):
+    d_ = s.get(QuizDraft, id)
+    if not d_ or (d_.user_id != u.id and u.role != "admin"):
+        raise HTTPException(404, "Draft not found.")
+    return {"id": d_.id, "topic": d_.topic, "difficulty": d_.difficulty, "questions": d_.questions}
+
+@app.delete("/api/quiz-drafts/{id}")
+def delete_draft(id: int, u=Depends(teacher), s=Depends(db)):
+    d_ = s.get(QuizDraft, id)
+    if not d_ or (d_.user_id != u.id and u.role != "admin"):
+        raise HTTPException(404, "Draft not found.")
+    s.delete(d_); s.commit()
+    return {"ok": True}
+
 # Document Analysis
 @app.post("/api/documents/analyze")
 async def analyze_documents(
@@ -210,16 +245,7 @@ async def analyze_documents(
         segs.append({"text": text.strip(), "source": "Pasted learning notes"})
 
     if topic.strip() and not segs:
-        if os.path.exists(SAMPLES):
-            for fn in os.listdir(SAMPLES):
-                if any(w in fn.replace("_", " ") for w in topic.lower().split()):
-                    segs.append({"text": open(os.path.join(SAMPLES, fn), encoding="utf-8", errors="ignore").read(), "source": fn})
-        if not segs:
-            # Generate generic topic notes if sample notes aren't found
-            segs.append({
-                "text": f"{topic} is a key subject of study. Important concepts in {topic} involve algorithms, architecture, execution protocols, data structures, performance optimization, analysis methods, and system design. Understanding {topic} requires mastering definitions, components, mechanisms, and real-world applications.",
-                "source": f"Generated notes for {topic}"
-            })
+        segs = topic_segments(topic)
 
     if files and not segs:
         raise HTTPException(422, "No readable text was found in the uploaded file. If it is a scanned or image-only PDF, upload a text-based version or paste the text instead.")
@@ -394,7 +420,7 @@ def export_crossword(id: int, u=Depends(teacher), s=Depends(db)):
         f"<h3>{t}</h3><ol>" + "".join(f"<li value={c['n']}>{c['clue']}</li>" for c in d["clues"] if c["dir"] == t.lower()) + "</ol>"
         for t in ("Across", "Down")
     )
-    return f"""<!doctype html><html lang=en><meta charset=utf-8><title>CrossMind — {p.title}</title>
+    return f"""<!doctype html><html lang=en><meta charset=utf-8><title>CrossMind: {p.title}</title>
 <style>
 body{{font-family:system-ui,-apple-system,sans-serif;margin:30px;color:#1e293b}}
 table{{border-collapse:collapse;margin-bottom:20px}}
@@ -403,7 +429,7 @@ td.c{{border:1px solid #000}}td.x{{border:0}}
 b{{position:absolute;inset:8px 0 0;text-align:center;font-size:16px}}
 .pb{{page-break-before:always}}
 </style>
-<h1>CrossMind — {p.title}</h1>
+<h1>CrossMind: {p.title}</h1>
 <p>Difficulty: {p.difficulty.upper()} · Created: {p.created:%d %b %Y}</p>
 {grid(False)}
 <div class=pb>{clues_html}</div>
@@ -610,16 +636,12 @@ def generate_quiz(b: QuizGenSchema, u=Depends(teacher), s=Depends(db)):
             segs = doc.segs
     if not segs and b.text.strip():
         segs = [{"text": b.text.strip(), "source": "Provided Notes"}]
-    if not segs and b.topic.strip():
-        if os.path.exists(SAMPLES):
-            for fn in os.listdir(SAMPLES):
-                if any(w in fn.replace("_", " ") for w in b.topic.lower().split()):
-                    segs.append({"text": open(os.path.join(SAMPLES, fn), encoding="utf-8", errors="ignore").read(), "source": fn})
-        if not segs:
-            segs = [{
-                "text": f"Study material for {b.topic}. Fundamental concepts include architecture, core mechanisms, definitions, protocol standards, evaluation metrics, and implementation techniques.",
-                "source": b.topic
-            }]
+    if not segs and b.topic.strip() and b.topic.strip() != "General Quiz":
+        segs = topic_segments(b.topic)
+    if not segs:
+        raise HTTPException(422, "Provide a topic, paste notes, or upload a file.")
+    if len(nlp.concepts(segs)) < 3:
+        raise HTTPException(422, "Not enough readable material to build a quiz. Please provide more detailed notes.")
 
     questions = quiz_generator.generate_quiz_questions(
         segs=segs,
@@ -629,10 +651,19 @@ def generate_quiz(b: QuizGenSchema, u=Depends(teacher), s=Depends(db)):
         q_types=b.question_types
     )
 
+    seen_q, uniq = set(), []
+    for q_ in questions:
+        k = re.sub(r"\W+", " ", q_["question"].lower()).strip()
+        if k not in seen_q:
+            seen_q.add(k); uniq.append(q_)
+    questions = uniq
     if not questions:
         raise HTTPException(422, "Could not generate quiz questions from supplied material.")
+    draft = QuizDraft(user_id=u.id, topic=b.topic.strip() or "Quiz", difficulty=b.difficulty, questions=questions)
+    s.add(draft); s.commit()
 
     return {
+        "draft_id": draft.id,
         "topic": b.topic,
         "difficulty": b.difficulty,
         "count": len(questions),

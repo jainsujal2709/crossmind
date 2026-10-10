@@ -38,7 +38,9 @@ def test_flow():
     # A teacher (created by the admin) can analyze a document & generate a crossword
     c.post("/api/admin/teachers", json={"email": "t@x.io", "password": "teachpass1", "name": "T"}, headers=admin_hdr)
     teacher_hdr = get_token("t@x.io", "teachpass1")
-    a = c.post("/api/documents/analyze", data={"topic": "machine learning"}, headers=teacher_hdr).json()
+    import os
+    notes = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "sample_data", "machine_learning.txt"), encoding="utf-8").read()
+    a = c.post("/api/documents/analyze", data={"topic": "machine learning", "text": notes}, headers=teacher_hdr).json()
     assert "doc_id" in a
 
     p = c.post("/api/crosswords/generate", json={"doc_id": a["doc_id"], "difficulty": "easy", "count": 8}, headers=teacher_hdr).json()

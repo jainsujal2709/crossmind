@@ -74,6 +74,7 @@ function renderAppNav(isAdmin = false) {
       <a href="#classrooms">My Classrooms</a>
       <a href="#create-quiz">Create Quiz</a>
       <a href="#create-crossword">Generate Crossword</a>
+      <a href="#history">History</a>
     `;
   } else {
     // Student
@@ -93,7 +94,7 @@ function renderAppNav(isAdmin = false) {
       <div class="nav-links">
         ${navItems}
         <span class="tag ${role === 'teacher' ? 'completed' : 'active'}" style="margin-left: 10px;">${role.toUpperCase()}: ${name}</span>
-        <button class="btn alt" onclick="theme()" aria-label="Toggle theme">◐ Theme</button>
+        <button class="btn alt" onclick="theme()" aria-label="Toggle theme">Theme</button>
         <button class="btn alt" onclick="localStorage.clear();location='/index.html'">Logout</button>
       </div>
     </nav>

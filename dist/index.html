@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>CrossMind — AI/NLP Crossword & Classroom Learning Platform</title>
+  <title>CrossMind | Sign in</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
@@ -13,7 +16,7 @@
     <div class="nav-links">
       <a href="#auth" class="btn alt" onclick="showAuthModal('login')">Student Login</a>
       <a href="#auth" class="btn primary" onclick="showAuthModal('login')">Teacher Login</a>
-      <button class="btn alt" onclick="theme()" aria-label="Toggle theme">◐ Theme</button>
+      <button class="btn alt" onclick="theme()" aria-label="Toggle theme">Theme</button>
     </div>
   </nav>
 
@@ -42,12 +45,12 @@
         <!-- Register Form -->
         <div id="form-reg" class="auth-form" style="display:none">
           <h3>Create Your Student Account</h3>
-          <p class="mu">Student registration is open to everyone. Teachers cannot self-register &mdash; the administrator creates teacher accounts.</p>
+          <p class="mu">Student registration is open to everyone. Teachers cannot self-register. The administrator creates teacher accounts.</p>
           <label>Full Name
-            <input id="rn" type="text" placeholder="Sujal Patil" required>
+            <input id="rn" type="text" placeholder="Your full name" required>
           </label>
           <label>Email Address
-            <input id="re" type="email" placeholder="sujal@example.com" required>
+            <input id="re" type="email" placeholder="you@example.com" required>
           </label>
           <label>Password (min 6 chars)
             <input id="rp" type="password" placeholder="••••••••" required>
@@ -70,9 +73,9 @@
     </section>
 
   </main>
+  <footer class="footer"><a href="/privacy.html">Privacy Policy</a><a href="/terms.html">Terms and Conditions</a></footer>
 
   <script src="js/api.js"></script>
-  <script src="js/bg.js"></script>
   <script>
     let targetRedirect = '';
 

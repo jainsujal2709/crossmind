@@ -70,6 +70,15 @@ class Puzzle(Base):
     hints = Column(Integer, default=0)
     created = Column(DateTime, default=now)
 
+class QuizDraft(Base):
+    __tablename__ = "quiz_drafts"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    topic = Column(String)
+    difficulty = Column(String)
+    questions = Column(JSON)
+    created = Column(DateTime, default=now)
+
 class Classroom(Base):
     __tablename__ = "classrooms"
     id = Column(Integer, primary_key=True)
