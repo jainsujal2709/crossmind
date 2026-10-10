@@ -15,12 +15,23 @@ def _clean_db_url(raw):
         base, query = u.split("?", 1)
         keep = [q for q in query.split("&") if q and not q.startswith("channel_binding")]
         u = base + ("?" + "&".join(keep) if keep else "")
+    if u.startswith("postgresql+psycopg2://") and "sslmode=" not in u and "localhost" not in u and "127.0.0.1" not in u:
+        u += ("&" if "?" in u else "?") + "sslmode=require"      # never talk to a hosted database unencrypted
     return u
 
 DATABASE_URL = _clean_db_url(os.getenv("DATABASE_URL")) or ("sqlite:////tmp/crossmind.db" if os.getenv("VERCEL") else "sqlite:///./crossmind.db")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
-CORS = os.getenv("CORS_ORIGINS", "http://localhost:8000").split(",")
-MAX_BYTES = int(os.getenv("MAX_UPLOAD_MB", "4")) * 1024 * 1024
+CORS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:8000").split(",") if o.strip() and o.strip() != "*"]
+PROD = bool(os.getenv("VERCEL") or os.getenv("RENDER") or os.getenv("ENV") == "production")
+RATE_LIMIT_ON = os.getenv("RATE_LIMIT", "on").lower() != "off"
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))
+if os.getenv("VERCEL"):                           # Vercel rejects request bodies above ~4.5 MB, whatever we allow
+    MAX_UPLOAD_MB = min(MAX_UPLOAD_MB, 4)
+MAX_BYTES = MAX_UPLOAD_MB * 1024 * 1024          # per request (all files together)
+SESSION_HOURS = min(float(os.getenv("SESSION_HOURS", "3")), 12.0)   # login lasts this long, then the user is signed out
 EXTS = {".pdf", ".pptx", ".docx", ".xlsx", ".xls", ".csv", ".txt"}
+
+SECRET_OK = len(SECRET_KEY) >= 16 and not SECRET_KEY.lower().startswith(("dev-secret", "change-this", "changeme", "your-secret", "generate"))
+MAX_TEXT_CHARS = 5_000_000

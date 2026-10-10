@@ -1,4 +1,5 @@
 import sys, os
+os.environ["RATE_LIMIT"] = "off"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 import crossword, nlp
 def test_generate_valid():

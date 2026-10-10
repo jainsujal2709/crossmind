@@ -1,4 +1,5 @@
 import sys, os
+os.environ["RATE_LIMIT"] = "off"
 if os.path.exists("./test_app.db"): os.remove("./test_app.db")  # start from a clean database
 os.environ["DATABASE_URL"] = "sqlite:///./test_app.db"
 os.environ["ADMIN_EMAIL"] = "admin@crossmind.edu"

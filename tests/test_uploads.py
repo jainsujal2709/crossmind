@@ -1,5 +1,6 @@
 """Teacher uploads (PDF etc.) -> analyze -> quiz generation, including the messy real-world cases."""
 import sys, os
+os.environ["RATE_LIMIT"] = "off"
 if os.path.exists("./test_uploads.db"): os.remove("./test_uploads.db")  # start from a clean database
 os.environ["DATABASE_URL"] = "sqlite:///./test_uploads.db"
 os.environ["ADMIN_EMAIL"] = "a@x.io"

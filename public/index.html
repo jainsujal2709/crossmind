@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CrossMind | Sign in</title>
+  <meta name="description" content="CrossMind builds crosswords and classroom quizzes from your own study material.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -12,134 +13,118 @@
 <body>
   <div id="toast" role="status"></div>
   <nav class="glass-nav">
-    <a class="brand" href="/">CROSSMIND</a>
+    <a class="brand" href="/"><img src="/logo.svg" width="28" height="28" alt=""><span>CrossMind</span></a>
     <div class="nav-links">
-      <a href="#auth" class="btn alt" onclick="showAuthModal('login')">Student Login</a>
-      <a href="#auth" class="btn primary" onclick="showAuthModal('login')">Teacher Login</a>
-      <button class="btn alt" onclick="theme()" aria-label="Toggle theme">Theme</button>
+      <a href="/faq.html">FAQ</a>
+      <button class="btn alt" data-theme-btn onclick="theme()" aria-label="Toggle dark mode" aria-pressed="false">Theme</button>
     </div>
   </nav>
 
   <main class="container login-wrap">
-    <!-- Auth Modal / Card -->
     <section id="auth" class="auth-section">
       <div class="card auth-card">
-        <div class="auth-tabs">
-          <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">Sign In</button>
-          <button class="auth-tab" id="tab-reg" onclick="switchAuthTab('reg')">Student Sign Up</button>
+        <div class="auth-tabs" role="tablist">
+          <button class="auth-tab active" id="tab-login" role="tab" onclick="switchAuthTab('login')">Sign In</button>
+          <button class="auth-tab" id="tab-reg" role="tab" onclick="switchAuthTab('reg')">Student Sign Up</button>
         </div>
 
-        <!-- Login Form -->
         <div id="form-login" class="auth-form">
-          <h3>Welcome Back to CrossMind</h3>
+          <h1 class="auth-title">Sign in to CrossMind</h1>
           <p class="mu">Students and teachers sign in here. Teacher accounts are issued by the administrator.</p>
-          <label>Email Address
-            <input id="le" type="email" placeholder="student@example.com" required>
-          </label>
-          <label>Password
-            <input id="lp" type="password" placeholder="••••••••" required>
-          </label>
-          <button class="btn primary block lg" onclick="login()">Sign In</button>
+          <label for="le">Email address</label>
+          <input id="le" type="email" autocomplete="username" maxlength="120" required>
+          <label for="lp">Password</label>
+          <input id="lp" type="password" autocomplete="current-password" maxlength="72" required>
+          <button class="btn primary block lg" id="login-btn" onclick="login()">Sign In</button>
+          <p class="mu small-note">Forgot your password? Ask your teacher or the administrator to reset it. Sign-ins last 3 hours.</p>
         </div>
 
-        <!-- Register Form -->
         <div id="form-reg" class="auth-form" style="display:none">
-          <h3>Create Your Student Account</h3>
-          <p class="mu">Student registration is open to everyone. Teachers cannot self-register. The administrator creates teacher accounts.</p>
-          <label>Full Name
-            <input id="rn" type="text" placeholder="Your full name" required>
-          </label>
-          <label>Email Address
-            <input id="re" type="email" placeholder="you@example.com" required>
-          </label>
-          <label>Password (min 6 chars)
-            <input id="rp" type="password" placeholder="••••••••" required>
-          </label>
-          <label>Roll No. (optional)
-            <input id="rroll" type="text" placeholder="e.g. 23CS045">
-          </label>
-          <label>Course / Class (optional)
-            <input id="rcourse" type="text" placeholder="e.g. B.Tech CSE">
-          </label>
-          <label>Division (optional)
-            <input id="rdiv" type="text" placeholder="e.g. A">
-          </label>
-          <label>Phone (optional)
-            <input id="rphone" type="tel" placeholder="e.g. 9876543210">
-          </label>
-          <button class="btn accent block lg" onclick="reg()">Register as Student</button>
+          <h1 class="auth-title">Create a student account</h1>
+          <p class="mu">Students can register here. Teachers cannot self-register; the administrator creates teacher accounts.</p>
+          <label for="rn">Full name</label>
+          <input id="rn" type="text" autocomplete="name" maxlength="60" required>
+          <label for="re">Email address</label>
+          <input id="re" type="email" autocomplete="email" maxlength="120" required>
+          <label for="rp">Password</label>
+          <input id="rp" type="password" autocomplete="new-password" maxlength="72" required>
+          <small class="mu">At least 8 characters, with a letter and a number.</small>
+          <label for="rroll">Roll number (optional)</label>
+          <input id="rroll" type="text" maxlength="30">
+          <label for="rcourse">Course or class (optional)</label>
+          <input id="rcourse" type="text" maxlength="60">
+          <label for="rdiv">Division (optional)</label>
+          <input id="rdiv" type="text" maxlength="20">
+          <label for="rphone">Phone (optional)</label>
+          <input id="rphone" type="tel" autocomplete="tel" maxlength="20">
+          <button class="btn primary block lg" id="reg-btn" onclick="reg()">Create account</button>
+        </div>
+
+        <div id="reg-success" class="success-panel" style="display:none" role="status">
+          <h3>Account created</h3>
+          <p>You can now sign in with your email and password.</p>
+          <button class="btn primary block" onclick="switchAuthTab('login')">Go to sign in</button>
         </div>
       </div>
     </section>
-
   </main>
-  <footer class="footer"><a href="/privacy.html">Privacy Policy</a><a href="/terms.html">Terms and Conditions</a></footer>
+  <footer class="footer" id="site-footer"></footer>
 
+  <script src="js/site.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/ui.js"></script>
   <script>
     let targetRedirect = '';
-
-    function showAuthModal(tab, redirect) {
-      switchAuthTab(tab === 'reg' ? 'reg' : 'login');
-      if(redirect) targetRedirect = redirect;
-      document.getElementById('auth').scrollIntoView({behavior: 'smooth'});
-    }
+    if (Session.valid()) { location = localStorage.role === 'admin' ? '/admin.html' : '/app.html#dashboard'; }
+    else { Session.clear(); }
 
     function switchAuthTab(tab) {
-      if(tab === 'login') {
-        $('#tab-login').classList.add('active');
-        $('#tab-reg').classList.remove('active');
-        $('#form-login').style.display = 'block';
-        $('#form-reg').style.display = 'none';
-      } else {
-        $('#tab-reg').classList.add('active');
-        $('#tab-login').classList.remove('active');
-        $('#form-reg').style.display = 'block';
-        $('#form-login').style.display = 'none';
-      }
+      const login = tab === 'login';
+      $('#tab-login').classList.toggle('active', login);
+      $('#tab-reg').classList.toggle('active', !login);
+      $('#form-login').style.display = login ? 'block' : 'none';
+      $('#form-reg').style.display = login ? 'none' : 'block';
+      $('#reg-success').style.display = 'none';
+      $('.auth-tabs').style.display = 'flex';
     }
 
+    function setBusy(id, on, label) { const b = $(id); b.disabled = on; b.textContent = on ? 'Please wait...' : label; }
+
     async function login() {
+      setBusy('#login-btn', true, 'Sign In');
       try {
-        const d = await API.f('/auth/login', {
-          method: 'POST',
-          json: { email: $('#le').value, password: $('#lp').value }
-        });
-        localStorage.ct = d.token;
-        localStorage.name = d.name;
-        localStorage.role = d.role;
-        toast('Welcome back, ' + d.name + '!');
-        setTimeout(() => {
-          if(d.role === 'admin') location = '/admin.html';
-          else location = '/app.html' + (targetRedirect || '#dashboard');
-        }, 500);
-      } catch(e) {
+        const d = await API.f('/auth/login', { method: 'POST', json: { email: $('#le').value, password: $('#lp').value } });
+        Session.set(d);
+        location = d.role === 'admin' ? '/admin.html' : '/app.html' + (targetRedirect || '#dashboard');
+      } catch (e) {
         toast(e.message);
+        setBusy('#login-btn', false, 'Sign In');
       }
     }
 
     async function reg() {
+      setBusy('#reg-btn', true, 'Create account');
       try {
-        const res = await API.f('/auth/register', {
+        await API.f('/auth/register', {
           method: 'POST',
-          json: {
-            name: $('#rn').value,
-            email: $('#re').value,
-            password: $('#rp').value,
-            roll_no: $('#rroll').value,
-            course: $('#rcourse').value,
-            division: $('#rdiv').value,
-            phone: $('#rphone').value
-          }
+          json: { name: $('#rn').value, email: $('#re').value, password: $('#rp').value, roll_no: $('#rroll').value,
+                  course: $('#rcourse').value, division: $('#rdiv').value, phone: $('#rphone').value, utm: UI.utm() }
         });
-        toast('Account registered! Auto-logging in...');
         $('#le').value = $('#re').value;
-        $('#lp').value = $('#rp').value;
-        await login();
-      } catch(e) {
+        ['#rn', '#re', '#rp', '#rroll', '#rcourse', '#rdiv', '#rphone'].forEach(i => $(i).value = '');
+        $('#form-reg').style.display = 'none';
+        $('.auth-tabs').style.display = 'none';
+        $('#reg-success').style.display = 'block';
+      } catch (e) {
         toast(e.message);
       }
+      setBusy('#reg-btn', false, 'Create account');
     }
+
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+      if ($('#form-login').contains(e.target)) login(); else if ($('#form-reg').contains(e.target)) reg();
+    });
   </script>
 </body>
 </html>

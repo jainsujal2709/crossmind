@@ -31,10 +31,13 @@
     </div>
     <div id="v"></div>
   </main>
-  <footer class="footer"><a href="/privacy.html">Privacy Policy</a><a href="/terms.html">Terms and Conditions</a></footer>
+  <footer class="footer" id="site-footer"></footer>
 
+  <script src="js/site.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/ui.js"></script>
   <script>
+    if (localStorage.role !== 'admin') { location = '/index.html'; }
     renderAppNav(true);
     const H = h => $('#v').innerHTML = h;
     // Escape anything user-controlled before putting it in innerHTML (students pick their own names!)
@@ -173,20 +176,20 @@
     }
 
     async function tg(id, role) {
-      if (!confirm('Enable/disable this account?')) return;
+      if (!(await confirmDialog('Enable or disable this account?', { okText: 'Yes, continue' }))) return;
       try { await API.f(`/admin/users/${id}/toggle`, { method: 'POST' }); people(role); } catch (e) { toast(e.message); }
     }
 
     async function rm(id, role) {
       const u = cache[id];
       const extra = role === 'teacher' ? ' This also deletes their classrooms, quizzes and all student results in them.' : '';
-      if (!confirm(`Permanently delete ${u.name}?${extra}`)) return;
+      if (!(await confirmDialog(`Permanently delete ${u.name}?${extra} This cannot be undone.`, { okText: 'Delete', danger: true }))) return;
       try { await API.f(`/admin/users/${id}`, { method: 'DELETE' }); people(role); } catch (e) { toast(e.message); }
     }
 
     async function exportCsv(role) {
       try {
-        const r = await fetch(API_BASE + `/api/admin/export?role=${role}`, { headers: { Authorization: 'Bearer ' + localStorage.ct } });
+        const r = await fetch(API_BASE + `/api/admin/export?role=${role}`, { credentials: 'same-origin' });
         if (!r.ok) throw new Error('Export failed');
         const url = URL.createObjectURL(await r.blob());
         const a = document.createElement('a'); a.href = url; a.download = role + 's.csv'; a.click();

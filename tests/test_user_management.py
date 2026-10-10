@@ -1,4 +1,5 @@
 import sys, os
+os.environ["RATE_LIMIT"] = "off"
 if os.path.exists("./test_users.db"): os.remove("./test_users.db")  # start from a clean database
 os.environ["DATABASE_URL"] = "sqlite:///./test_users.db"
 os.environ["ADMIN_EMAIL"] = "boss@crossmind.edu"
@@ -19,41 +20,43 @@ def test_user_management():
     admin = hdr("boss@crossmind.edu", "BossPass123")
 
     # --- student self-registration works and is stored with profile data
-    r = c.post("/api/auth/register", json={"email": "Stu@x.io", "password": "secret1", "name": "Stu <b>X</b>",
+    r = c.post("/api/auth/register", json={"email": "Stu@x.io", "password": "secret123", "name": "Stu <b>X</b>",
                                            "roll_no": "R1", "course": "BCA", "division": "A", "role": "admin"})
     assert r.status_code == 200 and r.json()["role"] == "student"      # 'role' ignored
-    assert c.post("/api/auth/register", json={"email": "stu@x.io", "password": "secret1", "name": "dup"}).status_code == 400
-    stu = hdr("stu@x.io", "secret1")                                    # email is case-insensitive
+    assert c.post("/api/auth/register", json={"email": "weak@x.io", "password": "short1", "name": "W"}).status_code == 422       # too short
+    assert c.post("/api/auth/register", json={"email": "weak@x.io", "password": "onlyletters", "name": "W"}).status_code == 422  # no number
+    assert c.post("/api/auth/register", json={"email": "stu@x.io", "password": "secret123", "name": "dup"}).status_code == 400
+    stu = hdr("stu@x.io", "secret123")                                    # email is case-insensitive
 
     students = c.get("/api/admin/users?role=student", headers=admin).json()
     me = next(u for u in students if u["email"] == "stu@x.io")
     assert me["roll_no"] == "R1" and me["course"] == "BCA" and me["last_login"] != "Never"
 
     # --- teacher cannot be created by the public or by a student
-    assert c.post("/api/admin/teachers", json={"name": "T", "email": "t@x.io", "password": "secret1"}, headers=stu).status_code == 403
+    assert c.post("/api/admin/teachers", json={"name": "T", "email": "t@x.io", "password": "secret123"}, headers=stu).status_code == 403
 
     # --- admin creates / edits teacher
-    t = c.post("/api/admin/teachers", json={"name": "Teach", "email": "t@x.io", "password": "secret1",
+    t = c.post("/api/admin/teachers", json={"name": "Teach", "email": "t@x.io", "password": "secret123",
                                             "department": "Math", "employee_id": "E9"}, headers=admin)
     assert t.status_code == 200 and t.json()["role"] == "teacher"
     tid = t.json()["id"]
-    assert c.post("/api/admin/teachers", json={"name": "T2", "email": "t@x.io", "password": "secret1"}, headers=admin).status_code == 400
+    assert c.post("/api/admin/teachers", json={"name": "T2", "email": "t@x.io", "password": "secret123"}, headers=admin).status_code == 400
 
-    u = c.put(f"/api/admin/users/{tid}", json={"name": "Teach Two", "department": "Physics", "password": "newpass1"}, headers=admin)
+    u = c.put(f"/api/admin/users/{tid}", json={"name": "Teach Two", "department": "Physics", "password": "newpass123"}, headers=admin)
     assert u.status_code == 200 and u.json()["department"] == "Physics"
-    hdr("t@x.io", "newpass1")                                           # reset password works
-    assert c.post("/api/auth/login", json={"email": "t@x.io", "password": "secret1"}).status_code == 401
+    hdr("t@x.io", "newpass123")                                           # reset password works
+    assert c.post("/api/auth/login", json={"email": "t@x.io", "password": "secret123"}).status_code == 401
 
     # --- search / filter
     assert [x["email"] for x in c.get("/api/admin/users?role=teacher&q=physics", headers=admin).json()] == ["t@x.io"]
 
     # --- disable blocks login
     c.put(f"/api/admin/users/{tid}", json={"active": False}, headers=admin)
-    assert c.post("/api/auth/login", json={"email": "t@x.io", "password": "newpass1"}).status_code == 403
+    assert c.post("/api/auth/login", json={"email": "t@x.io", "password": "newpass123"}).status_code == 403
     c.put(f"/api/admin/users/{tid}", json={"active": True}, headers=admin)
 
     # --- teacher data + delete teacher cascades cleanly (previously a FK error)
-    th = hdr("t@x.io", "newpass1")
+    th = hdr("t@x.io", "newpass123")
     cls = c.post("/api/classrooms", json={"name": "Cls", "subject": "Maths"}, headers=th).json()
     assert c.post("/api/classrooms/join", json={"code": cls["code"]}, headers=stu).status_code == 200
     assert c.post("/api/classrooms/join", json={"code": cls["code"]}, headers=th).status_code == 403   # teachers can't join

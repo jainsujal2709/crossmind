@@ -1,7 +1,9 @@
 // CrossMind - SPA Application Logic
 renderAppNav();
 
-const H = h => $('#v').innerHTML = h;
+const H = h => { $('#v').innerHTML = h; setLimitNote(); };
+function setLimitNote() { $$('.upload-limit').forEach(e => { e.textContent = ' Up to ' + window.UPLOAD_MAX_MB + ' MB in total, several files allowed.'; }); }
+configReady.then(setLimitNote);
 let CURRENT_DOC = null;
 let QUIZ_TIMER = null;
 let LEADERBOARD_INTERVAL = null;
@@ -15,7 +17,9 @@ let PLAY_DIR = 'across';
 let PLAY_SECS = 0;
 let PLAY_TIMER = null;
 
-const esc = s => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// For values placed inside inline handlers such as onclick="fn(${ejs(value)})": a JSON string literal, then HTML-escaped.
+const ejs = v => esc(JSON.stringify(String(v == null ? '' : v)));
 const emptyCard = (msg, btn) => `<div class="card" style="text-align:center;padding:40px 20px"><p class="mu" style="font-size:18px">${msg}</p>${btn || ''}</div>`;
 
 function route() {
@@ -205,7 +209,7 @@ async function teacherDash() {
                   <td><b>${esc(c.name)}</b></td>
                   <td>${esc(c.subject)} - Div ${esc(c.division)}</td>
                   <td>
-                    <span class="code-badge" style="font-size:16px;padding:4px 10px;" onclick="copyText('${c.code}')" title="Click to copy">
+                    <span class="code-badge" style="font-size:16px;padding:4px 10px;" onclick="copyText(${ejs(c.code)})" title="Click to copy">
                       ${c.code} <small>Copy</small>
 </span>
                   </td>
@@ -330,7 +334,7 @@ async function viewClassroom(id) {
             </div>
             <div>
               <span class="mu" style="font-size:14px;display:block;margin-bottom:4px;">CLASS CODE</span>
-              <span class="code-badge" onclick="copyText('${c.code}')" title="Click to copy code">
+              <span class="code-badge" onclick="copyText(${ejs(c.code)})" title="Click to copy code">
                 ${c.code} <small>Copy</small>
 </span>
             </div>
@@ -457,7 +461,7 @@ async function endQuiz(quizId, classId) {
 }
 
 async function removeStudent(classId, studentId) {
-  if (!confirm('Remove this student from classroom?')) return;
+  if (!(await confirmDialog('Remove this student from the classroom?', { okText: 'Remove', danger: true }))) return;
   try {
     await API.f(`/classrooms/${classId}/students/${studentId}`, { method: 'DELETE' });
     toast('Student removed.');
@@ -467,10 +471,7 @@ async function removeStudent(classId, studentId) {
   }
 }
 
-function copyText(txt) {
-  navigator.clipboard.writeText(txt);
-  toast('Classroom code ' + txt + ' copied to clipboard!');
-}
+function copyText(txt) { UI.copy(txt, 'Classroom code'); }
 
 // Teacher Quiz Generator View
 async function createQuizView() {
@@ -510,7 +511,7 @@ async function createQuizView() {
         <h3>2. Upload Material or Paste Notes</h3>
         <div id="drop" class="card" style="border-style:dashed;text-align:center;">
           Drop study files here or <input type="file" id="qz-fi" multiple accept=".pdf,.pptx,.docx,.xlsx,.xls,.csv,.txt"><br>
-          <small class="mu">Supported: PDF • PPTX • DOCX • XLSX • CSV • TXT</small>
+          <small class="mu">Supported: PDF • PPTX • DOCX • XLSX • CSV • TXT<span class="upload-limit"></span></small>
         </div>
         <label>Or Paste Learning Excerpt
           <textarea id="qz-tx" rows="4" placeholder="Paste notes or textbook chapter text here..."></textarea>
@@ -712,14 +713,14 @@ async function playQuizView(quizId) {
       let inputHtml = '';
       if (item.type === 'true_false' || item.type === 'mcq') {
         inputHtml = item.options.map(opt => `
-          <button class="option-btn ${selected === opt ? 'selected' : ''}" onclick="selectOption('${item.id}', '${esc(opt)}')">
+          <button class="option-btn ${selected === opt ? 'selected' : ''}" onclick="selectOption(${ejs(item.id)}, ${ejs(opt)})">
             <span class="mark"></span><span>${esc(opt)}</span>
 </button>
         `).join('');
       } else if (item.type === 'msq') {
         const selList = Array.isArray(selected) ? selected : [];
         inputHtml = item.options.map(opt => `
-          <button class="option-btn ${selList.includes(opt) ? 'selected' : ''}" onclick="toggleMsqOption('${item.id}', '${esc(opt)}')">
+          <button class="option-btn ${selList.includes(opt) ? 'selected' : ''}" onclick="toggleMsqOption(${ejs(item.id)}, ${ejs(opt)})">
             <span class="mark box"></span><span>${esc(opt)}</span>
 </button>
         `).join('');
@@ -744,7 +745,7 @@ async function playQuizView(quizId) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:30px;">
             <button class="btn alt" ${currentQIdx === 0 ? 'disabled' : ''} onclick="navQuestion(-1)">Previous</button>
             
-            ${item.hint ? `<button class="btn alt" onclick="toast('Hint: ' + '${esc(item.hint)}')"> Show Hint</button>` : ''}
+            ${item.hint ? `<button class="btn alt" onclick="toast(${ejs('Hint: ' + item.hint)})"> Show Hint</button>` : ''}
 
             ${currentQIdx === q.questions.length - 1 ? `
               <button class="btn primary lg" onclick="submitActiveQuiz()">Submit Quiz Now</button>
@@ -776,7 +777,7 @@ async function playQuizView(quizId) {
     };
 
     window.submitActiveQuiz = async () => {
-      if (!confirm('Are you sure you want to submit your quiz?')) return;
+      if (!(await confirmDialog('Submit your quiz now? You cannot change your answers afterwards.', { okText: 'Submit quiz' }))) return;
       clearInterval(QUIZ_TIMER);
       try {
         const res = await API.f(`/quizzes/${q.id}/submit`, {
@@ -1002,7 +1003,7 @@ function createCrosswordView() {
       <h3>1. Upload Material or Enter Topic</h3>
       <div id="drop" class="card" style="border-style:dashed;text-align:center">
         Drop files here or <input type="file" id="fi" multiple accept=".pdf,.pptx,.docx,.xlsx,.xls,.csv,.txt"><br>
-        <small class="mu">PDF • PPTX • DOCX • XLSX • CSV • TXT</small>
+        <small class="mu">PDF • PPTX • DOCX • XLSX • CSV • TXT<span class="upload-limit"></span></small>
       </div>
 
       <label>Topic / Subject
@@ -1171,7 +1172,7 @@ async function playCrosswordView(id) {
             ${PLAY_PUZZLE.clues.filter(c => c.dir === dir).map(c => `
               <li class="cl" id="clue-${c.n}-${dir}" style="margin-bottom:8px;padding:6px;border-radius:6px;cursor:pointer;" onclick="selectClue(${c.n}, '${dir}')">
                 <b>${c.n}.</b> ${esc(c.clue)}
-                <button class="btn alt" style="padding:2px 8px;font-size:12px;" onclick="event.stopPropagation();speakText('${esc(c.clue)}')"> Listen</button>
+                <button class="btn alt" style="padding:2px 8px;font-size:12px;" onclick="event.stopPropagation();speakText(${ejs(c.clue)})"> Listen</button>
               </li>
             `).join('')}
           </ul>
@@ -1264,9 +1265,8 @@ async function submitCrosswordPuzzle() {
 }
 
 async function exportCrosswordPrint(id) {
-  const r = await fetch(API_BASE + `/api/crosswords/${id}/export`, {
-    headers: { Authorization: 'Bearer ' + localStorage.ct }
-  });
+  const r = await fetch(API_BASE + `/api/crosswords/${id}/export`, { credentials: 'same-origin' });
+  if (!r.ok) { toast('Could not export this crossword.'); return; }
   const blob = new Blob([await r.text()], { type: 'text/html' });
   open(URL.createObjectURL(blob));
 }
@@ -1274,9 +1274,9 @@ async function exportCrosswordPrint(id) {
 // History View
 const fmtDate = iso => new Date(iso + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 async function historyView() {
-  H('<div class="container"><h1>History</h1>' + emptyCard('Loading...') + '</div>');
+  H('<div><h1>History</h1>' + emptyCard('Loading...') + '</div>');
   let h, classes = [];
-  try { h = await API.f('/history'); } catch (e) { return H('<div class="container"><h1>History</h1>' + emptyCard(esc(e.message || 'Could not load history.')) + '</div>'); }
+  try { h = await API.f('/history'); } catch (e) { return H('<div><h1>History</h1>' + emptyCard(esc(e.message || 'Could not load history.')) + '</div>'); }
   try { classes = await API.f('/classrooms'); } catch (e) {}
   const opts = classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   const cw = h.crosswords.length ? `<table class="t"><thead><tr><th>Topic</th><th>Level</th><th>Words</th><th>Created</th><th>Actions</th></tr></thead><tbody>${h.crosswords.map(x => `
@@ -1289,13 +1289,13 @@ async function historyView() {
   const qz = h.quizzes.length ? `<table class="t"><thead><tr><th>Title</th><th>Classroom</th><th>Questions</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>${h.quizzes.map(x => `
     <tr><td><b>${esc(x.title)}</b></td><td>${esc(x.classroom)}</td><td>${x.count}</td><td>${x.active ? 'Live' : 'Not live'}</td><td>${fmtDate(x.created)}</td>
     <td><a class="btn alt" href="#classroom/${x.classroom_id}">Open classroom</a></td></tr>`).join('')}</tbody></table>` : '<p class="mu">No quizzes assigned yet.</p>';
-  H(`<div class="container"><h1>History</h1>
+  H(`<div><h1>History</h1>
     <div class="card"><h3>Crosswords</h3>${cw}</div>
     <div class="card"><h3>Generated quizzes (not yet assigned)</h3>${dr}</div>
     <div class="card"><h3>Assigned quizzes</h3>${qz}</div></div>`);
 }
 async function deleteHistoryItem(kind, id) {
-  if (!confirm('Delete this item? This cannot be undone.')) return;
+  if (!(await confirmDialog('Delete this item? This cannot be undone.', { okText: 'Delete', danger: true }))) return;
   try { await API.f('/' + kind + '/' + id, { method: 'DELETE' }); toast('Deleted.'); historyView(); } catch (e) { toast(e.message); }
 }
 async function assignDraft(id) {

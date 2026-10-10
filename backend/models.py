@@ -28,6 +28,7 @@ class User(Base):
     Profile columns below are optional and role-specific.
     """
     __tablename__ = "users"
+    utm = Column(String, default="")      # marketing source captured at sign-up (utm_source etc.), may be empty
     id = Column(Integer, primary_key=True)
     email = Column(String, unique=True, index=True)
     name = Column(String)
@@ -69,6 +70,13 @@ class Puzzle(Base):
     secs = Column(Integer)
     hints = Column(Integer, default=0)
     created = Column(DateTime, default=now)
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    id = Column(Integer, primary_key=True)
+    email = Column(String, index=True)
+    ip = Column(String, index=True)
+    ts = Column(DateTime, default=now, index=True)
 
 class QuizDraft(Base):
     __tablename__ = "quiz_drafts"

@@ -1,4 +1,4 @@
-import os, io, csv, json, datetime as dt, collections, random, string
+import os, io, csv, json, html, time, datetime as dt, collections, random, string
 import jwt, bcrypt
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse, HTMLResponse, Response
@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 import re
 from urllib.parse import parse_qsl, urlencode
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
 
 import config, parser, nlp, crossword, quiz_generator
 import topic as topic_mod
@@ -17,8 +18,32 @@ from models import *
 
 SAMPLES = os.path.join(os.path.dirname(__file__), "..", "data", "sample_data")
 
-app = FastAPI(title="CrossMind")
-app.add_middleware(CORSMiddleware, allow_origins=config.CORS, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="CrossMind", docs_url=None, redoc_url=None, openapi_url=None)   # no public API docs
+app.add_middleware(CORSMiddleware, allow_origins=config.CORS, allow_credentials=True,
+                   allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type", "Authorization", "X-Requested-With"])
+
+
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+def clean(v, tags=True):
+    """Trim, drop control characters and (for short fields) angle brackets so markup can never be stored."""
+    v = _CTRL.sub("", v).strip()
+    return re.sub(r"[<>]", "", v) if tags else v
+
+from pydantic import model_validator
+class Clean(BaseModel):
+    """Base for request bodies: sanitises every short text field. Passwords and long notes are left untouched."""
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitise(cls, data):
+        if isinstance(data, dict):
+            return {k: (v if k in ("password", "text") or not isinstance(v, str) else clean(v)) for k, v in data.items()}
+        return data
+
+def check_pw(p):
+    if len(p) < 8 or not re.search(r"[A-Za-z]", p) or not re.search(r"\d", p):
+        raise HTTPException(422, "Password must be at least 8 characters and include a letter and a number.")
+    if len(p.encode()) > 72:
+        raise HTTPException(422, "Password is too long (72 bytes maximum).")
 
 hash_pw = lambda p: bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode()
 
@@ -66,9 +91,74 @@ def init_db():
 init_db()
 
 @app.middleware("http")
+async def no_store_api(request: Request, call_next):
+    resp = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"      # never cache account or quiz data
+    return resp
+
+@app.middleware("http")
 async def db_guard(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.url.path != "/api/health" and not _ready and not init_db():
         return JSONResponse({"detail": f"Database is not reachable ({_init_error}). Check DATABASE_URL in your hosting settings, then see /api/health."}, 503)
+    return await call_next(request)
+
+
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+       "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    h = resp.headers
+    h["Content-Security-Policy"] = CSP
+    h["X-Content-Type-Options"] = "nosniff"
+    h["X-Frame-Options"] = "DENY"
+    h["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    h["Permissions-Policy"] = "camera=(), geolocation=(), payment=(), microphone=(self)"
+    h["Cross-Origin-Opener-Policy"] = "same-origin"
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return resp
+
+@app.middleware("http")
+async def csrf_guard(request: Request, call_next):
+    """Cookie sessions are SameSite=Lax; on top of that every state-changing call that relies on the cookie
+    must carry our custom header, which other websites cannot add to a cross-site request."""
+    if (request.url.path.startswith("/api/") and request.url.path not in ("/api/auth/login", "/api/auth/register")
+            and request.method in ("POST", "PUT", "DELETE", "PATCH")
+            and request.cookies.get(COOKIE) and not request.headers.get("authorization")
+            and request.headers.get("x-requested-with") != "CrossMind"):
+        return JSONResponse({"detail": "Request blocked."}, 403)
+    return await call_next(request)
+
+_hits = collections.defaultdict(collections.deque)
+RATE_RULES = [("/api/auth/login", 20, 60), ("/api/auth/register", 8, 600), ("/api/quizzes/generate", 20, 60),
+              ("/api/crosswords/generate", 20, 60), ("/api/documents/analyze", 20, 60)]
+
+def _limited(key, limit, window):
+    now_ = time.time(); q = _hits[key]
+    while q and q[0] < now_ - window:
+        q.popleft()
+    if len(q) >= limit:
+        return True
+    q.append(now_)
+    return False
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") and config.RATE_LIMIT_ON and request.method != "OPTIONS":
+        if len(_hits) > 20000:
+            _hits.clear()
+        ip = client_ip(request)
+        for prefix, limit, window in RATE_RULES:
+            if path == prefix and _limited(f"{ip}|{prefix}", limit, window):
+                return JSONResponse({"detail": "Too many requests. Please slow down and try again shortly."}, 429, headers={"Retry-After": str(window)})
+        if _limited(f"{ip}|all", 300, 60):
+            return JSONResponse({"detail": "Too many requests. Please slow down and try again shortly."}, 429, headers={"Retry-After": "60"})
+    if path == "/api/documents/analyze" and int(request.headers.get("content-length") or 0) > config.MAX_BYTES + 2 * 1024 * 1024:
+        return JSONResponse({"detail": f"Uploads are limited to {config.MAX_UPLOAD_MB} MB in total."}, 413)
     return await call_next(request)
 
 @app.middleware("http")
@@ -92,19 +182,39 @@ async def http_error_handler(request: Request, e: StarletteHTTPException):
         body["path"] = request.url.path          # helps diagnose hosting/routing problems
     return JSONResponse(body, e.status_code, headers=getattr(e, "headers", None))
 
+@app.exception_handler(RequestValidationError)
+async def validation_handler(request: Request, e: RequestValidationError):
+    first = (e.errors() or [{}])[0]
+    field = str(([x for x in first.get("loc", []) if isinstance(x, str)] or ["input"])[-1]).replace("_", " ")
+    kind = first.get("type", "")
+    if field == "password":
+        msg = "Password must be at least 8 characters and include a letter and a number."
+    elif "too_short" in kind:
+        msg = f"{field.capitalize()} is too short."
+    elif "too_long" in kind:
+        msg = f"{field.capitalize()} is too long."
+    elif "pattern" in kind:
+        msg = f"Please enter a valid {field}."
+    else:
+        msg = f"Please check the {field} field."
+    return JSONResponse({"detail": msg}, 422)
+
 @app.get("/api/health")
 def health():
-    return {"ok": _ready, "database": "connected" if _ready else "error", "error_type": _init_error,
-            "admin_configured": bool(config.ADMIN_EMAIL and config.ADMIN_PASSWORD),
-            "secret_key_set": config.SECRET_KEY != "dev-secret-change-me"}
+    return {"ok": _ready, "database": "connected" if _ready else "error"}
+
+@app.get("/api/config")
+def public_config():
+    return {"max_upload_mb": config.MAX_UPLOAD_MB, "session_hours": config.SESSION_HOURS}
 
 @app.exception_handler(Exception)
 async def err_handler(request: Request, e: Exception):
     with Session() as s:
-        log(s, "error", f"{request.url.path}: {type(e).__name__}: {str(e)}")
+        log(s, "error", f"{request.url.path}: {type(e).__name__}: {_redact(e)}")
     return JSONResponse({"detail": str(e) if isinstance(e, HTTPException) else "Something went wrong. Please try again."}, 500)
 
-bearer = HTTPBearer()
+bearer = HTTPBearer(auto_error=False)
+COOKIE = "cm_session"
 
 def db():
     s = Session()
@@ -113,9 +223,12 @@ def db():
     finally:
         s.close()
 
-def me(c=Depends(bearer), s=Depends(db)):
+def me(request: Request, c=Depends(bearer), s=Depends(db)):
+    token = c.credentials if c else request.cookies.get(COOKIE)
+    if not token:
+        raise HTTPException(401, "Please log in.")
     try:
-        payload = jwt.decode(c.credentials, config.SECRET_KEY, algorithms=["HS256"])
+        payload = jwt.decode(token, config.SECRET_KEY, algorithms=["HS256"], options={"require": ["exp", "sub"]})
         uid = int(payload["sub"])
     except Exception:
         raise HTTPException(401, "Please log in again.")
@@ -135,27 +248,30 @@ def admin(u=Depends(me)):
     return u
 
 # Authentication Schemas & Routes
-class Reg(BaseModel):
+class Reg(Clean):
     # NOTE: there is intentionally no `role` field. Public sign-up always creates a STUDENT.
     # Any "role" sent by a client is ignored. Teachers are created by an admin only.
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8, max_length=72)
     name: str = Field(min_length=1, max_length=60)
+    utm: Dict[str, str] = {}
     phone: str = Field("", max_length=20)
     roll_no: str = Field("", max_length=30)
     course: str = Field("", max_length=60)
     division: str = Field("", max_length=20)
 
-class Login(BaseModel):
+class Login(Clean):
     email: str
     password: str
 
 @app.post("/api/auth/register")
 def register(b: Reg, s=Depends(db)):
     email = b.email.strip().lower()
+    check_pw(b.password)
     if s.query(User).filter_by(email=email).first():
         raise HTTPException(400, "Email already registered.")
-    user = User(
+    utm = {k[:20]: v[:80] for k, v in list(b.utm.items())[:6] if k.startswith("utm_")}
+    user = User(utm=json.dumps(utm) if utm else "", 
         email=email, name=b.name.strip(), pw=hash_pw(b.password), role="student", active=True,
         phone=b.phone.strip(), roll_no=b.roll_no.strip(), course=b.course.strip(), division=b.division.strip(),
     )
@@ -163,22 +279,49 @@ def register(b: Reg, s=Depends(db)):
     s.commit()
     return {"ok": True, "role": user.role}
 
+DUMMY_HASH = bcrypt.hashpw(b"not-a-real-password", bcrypt.gensalt()).decode()
+
+def client_ip(request: Request):
+    if config.PROD:
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()[:45]
+    return (request.client.host if request.client else "unknown")[:45]
+
+def _secure(request: Request):
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+
 @app.post("/api/auth/login")
-def login(b: Login, s=Depends(db)):
-    u = s.query(User).filter_by(email=b.email.strip().lower()).first()
-    if not u or not bcrypt.checkpw(b.password.encode(), u.pw.encode()):
-        log(s, "warning", f"Failed login for {b.email}")
+def login(b: Login, request: Request, response: Response, s=Depends(db)):
+    if config.PROD and not config.SECRET_OK:
+        raise HTTPException(503, "Server is not configured securely. The administrator must set a strong SECRET_KEY.")
+    email, ip = b.email.strip().lower()[:120], client_ip(request)
+    since = dt.datetime.utcnow() - dt.timedelta(minutes=15)
+    if config.RATE_LIMIT_ON and (s.query(LoginAttempt).filter(LoginAttempt.email == email, LoginAttempt.ts > since).count() >= 8
+                                 or s.query(LoginAttempt).filter(LoginAttempt.ip == ip, LoginAttempt.ts > since).count() >= 30):
+        raise HTTPException(429, "Too many failed attempts. Please wait 15 minutes and try again.")
+    u = s.query(User).filter_by(email=email).first()
+    ok = bcrypt.checkpw(b.password.encode()[:72], (u.pw if u else DUMMY_HASH).encode())     # same work whether or not the account exists
+    if not u or not ok:
+        s.add(LoginAttempt(email=email, ip=ip)); s.commit()
+        s.query(LoginAttempt).filter(LoginAttempt.ts < dt.datetime.utcnow() - dt.timedelta(days=1)).delete(); s.commit()
         raise HTTPException(401, "Invalid email or password.")
     if not u.active:
         raise HTTPException(403, "This account is disabled.")
+    s.query(LoginAttempt).filter(LoginAttempt.email == email).delete()
     u.last_login = dt.datetime.utcnow()
     s.commit()
-    tok = jwt.encode(
-        {"sub": str(u.id), "role": u.role, "name": u.name, "exp": dt.datetime.utcnow() + dt.timedelta(days=7)},
-        config.SECRET_KEY,
-        algorithm="HS256"
-    )
-    return {"token": tok, "role": u.role, "name": u.name, "email": u.email, "id": u.id}
+    now_ = dt.datetime.utcnow()
+    exp = now_ + dt.timedelta(hours=config.SESSION_HOURS)
+    tok = jwt.encode({"sub": str(u.id), "role": u.role, "iat": now_, "exp": exp}, config.SECRET_KEY, algorithm="HS256")
+    response.set_cookie(COOKIE, tok, max_age=int(config.SESSION_HOURS * 3600), httponly=True, secure=_secure(request), samesite="lax", path="/")
+    return {"token": tok, "role": u.role, "name": u.name, "email": u.email, "id": u.id,
+            "expires_at": int(exp.replace(tzinfo=dt.timezone.utc).timestamp() * 1000)}
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(COOKIE, path="/")
+    return {"ok": True}
 
 @app.get("/api/auth/me")
 def get_profile(u=Depends(me)):
@@ -228,11 +371,13 @@ async def analyze_documents(
     s=Depends(db)
 ):
     segs = []
+    total = 0
     for f in files:
         data = await f.read(config.MAX_BYTES + 1)
         name = re.sub(r"[^\w.\- ]", "_", os.path.basename(f.filename or "file"))
-        if len(data) > config.MAX_BYTES:
-            raise HTTPException(413, f"File '{name}' exceeds size limit.")
+        total += len(data)
+        if total > config.MAX_BYTES:
+            raise HTTPException(413, f"The files together are larger than the {config.MAX_UPLOAD_MB} MB limit.")
         if os.path.splitext(name)[1].lower() not in config.EXTS:
             raise HTTPException(415, f"File type '{os.path.splitext(name)[1]}' is not supported.")
         try:
@@ -241,8 +386,14 @@ async def analyze_documents(
             log(s, "error", f"Parse {name}: {type(e).__name__}")
             raise HTTPException(422, f"Could not extract content from {name}.")
 
+    if len(text) > 400_000:
+        raise HTTPException(413, "Pasted text is too long. Please upload it as a file instead.")
     if text.strip():
         segs.append({"text": text.strip(), "source": "Pasted learning notes"})
+    budget = config.MAX_TEXT_CHARS                     # protects the server from decompression bombs
+    for sg in segs:
+        sg["text"] = sg["text"][:max(budget, 0)]; budget -= len(sg["text"])
+    segs = [sg for sg in segs if sg["text"].strip()]
 
     if topic.strip() and not segs:
         segs = topic_segments(topic)
@@ -259,7 +410,7 @@ async def analyze_documents(
     return {"doc_id": d.id, "name": d.name, "segments": len(segs), "sentences": len(list(nlp.sentences(segs))), "concepts": cs}
 
 # Crosswords
-class CrosswordGenSchema(BaseModel):
+class CrosswordGenSchema(Clean):
     doc_id: int
     difficulty: str = "medium"
     count: int = Field(15, ge=5, le=40)
@@ -320,7 +471,7 @@ def delete_crossword(id: int, u=Depends(teacher), s=Depends(db)):
     s.commit()
     return {"ok": True}
 
-class CrosswordAns(BaseModel):
+class CrosswordAns(Clean):
     answers: dict[str, str] = {}
     secs: int = 0
 
@@ -338,7 +489,7 @@ def check_crossword(id: int, b: CrosswordAns, u=Depends(teacher), s=Depends(db))
         raise HTTPException(404, "Crossword not found.")
     return {f"{c['n']}-{c['dir']}": st for c, a, st in grade_crossword(p, b.answers)}
 
-class CrosswordHint(BaseModel):
+class CrosswordHint(Clean):
     n: int
     dir: str
 
@@ -412,15 +563,15 @@ def export_crossword(id: int, u=Depends(teacher), s=Depends(db)):
                 num = nums.get((r, k), '')
                 val = cells[(r, k)] if ans and is_c else ''
                 cls = 'c' if is_c else 'x'
-                cols.append(f"<td class='{cls}'>{num}<b>{val}</b></td>")
+                cols.append(f"<td class='{cls}'>{num}<b>{html.escape(str(val))}</b></td>")
             rows.append("<tr>" + "".join(cols) + "</tr>")
         return "<table>" + "".join(rows) + "</table>"
 
     clues_html = "".join(
-        f"<h3>{t}</h3><ol>" + "".join(f"<li value={c['n']}>{c['clue']}</li>" for c in d["clues"] if c["dir"] == t.lower()) + "</ol>"
+        f"<h3>{t}</h3><ol>" + "".join(f"<li value={int(c['n'])}>{html.escape(str(c['clue']))}</li>" for c in d["clues"] if c["dir"] == t.lower()) + "</ol>"
         for t in ("Across", "Down")
     )
-    return f"""<!doctype html><html lang=en><meta charset=utf-8><title>CrossMind: {p.title}</title>
+    return f"""<!doctype html><html lang=en><meta charset=utf-8><title>CrossMind: {html.escape(p.title or '')}</title>
 <style>
 body{{font-family:system-ui,-apple-system,sans-serif;margin:30px;color:#1e293b}}
 table{{border-collapse:collapse;margin-bottom:20px}}
@@ -429,7 +580,7 @@ td.c{{border:1px solid #000}}td.x{{border:0}}
 b{{position:absolute;inset:8px 0 0;text-align:center;font-size:16px}}
 .pb{{page-break-before:always}}
 </style>
-<h1>CrossMind: {p.title}</h1>
+<h1>CrossMind: {html.escape(p.title or '')}</h1>
 <p>Difficulty: {p.difficulty.upper()} · Created: {p.created:%d %b %Y}</p>
 {grid(False)}
 <div class=pb>{clues_html}</div>
@@ -442,7 +593,7 @@ def generate_classroom_code():
     chars = chars.replace("0", "").replace("O", "").replace("1", "").replace("I", "") # avoid ambiguous chars
     return "".join(random.choice(chars) for _ in range(6))
 
-class CreateClassroomSchema(BaseModel):
+class CreateClassroomSchema(Clean):
     name: str = Field(min_length=2, max_length=100)
     subject: str = Field(min_length=2, max_length=100)
     division: str = "A"
@@ -474,7 +625,7 @@ def create_classroom(b: CreateClassroomSchema, u=Depends(teacher), s=Depends(db)
         "created": classroom.created.isoformat()
     }
 
-class JoinClassroomSchema(BaseModel):
+class JoinClassroomSchema(Clean):
     code: str
 
 @app.post("/api/classrooms/join")
@@ -619,10 +770,10 @@ def remove_student_from_classroom(id: int, student_id: int, u=Depends(teacher), 
     return {"ok": True}
 
 # Quiz Generation, Management & Live Competition
-class QuizGenSchema(BaseModel):
+class QuizGenSchema(Clean):
     doc_id: Optional[int] = None
     topic: str = "General Quiz"
-    text: str = ""
+    text: str = Field("", max_length=400000)
     difficulty: str = "medium"
     count: int = Field(15, ge=5, le=40)
     question_types: List[str] = ["mcq", "true_false", "msq"]
@@ -670,14 +821,14 @@ def generate_quiz(b: QuizGenSchema, u=Depends(teacher), s=Depends(db)):
         "questions": questions
     }
 
-class CreateQuizSchema(BaseModel):
+class CreateQuizSchema(Clean):
     classroom_id: int
     doc_id: Optional[int] = None
     title: str = Field(min_length=2, max_length=100)
     topic: str = Field(min_length=2, max_length=100)
     difficulty: str = "medium"
     time_limit: int = Field(15, ge=1, le=180) # minutes
-    questions: List[Dict[str, Any]]
+    questions: List[Dict[str, Any]] = Field(max_length=100)
     controls: Dict[str, Any] = {
         "randomize_questions": True,
         "randomize_options": True,
@@ -777,7 +928,7 @@ def get_quiz(id: int, u=Depends(me), s=Depends(db)):
         } if attempt else None
     }
 
-class SubmitQuizSchema(BaseModel):
+class SubmitQuizSchema(Clean):
     answers: Dict[str, Any] # {q_id: answer_value}
     time_taken_secs: int = 0
 
@@ -786,6 +937,10 @@ def submit_quiz(id: int, b: SubmitQuizSchema, u=Depends(me), s=Depends(db)):
     q = s.get(Quiz, id)
     if not q:
         raise HTTPException(404, "Quiz not found.")
+    if u.role != "student" or not s.query(ClassroomMember).filter_by(classroom_id=q.classroom_id, student_id=u.id).first():
+        raise HTTPException(403, "Only students enrolled in this classroom can submit this quiz.")
+    if not q.is_active:
+        raise HTTPException(400, "This quiz is not open for submissions.")
 
     existing = s.query(QuizAttempt).filter_by(quiz_id=q.id, student_id=u.id).first()
     if existing:
@@ -883,6 +1038,8 @@ def live_quiz_leaderboard(id: int, u=Depends(me), s=Depends(db)):
 
     c = s.get(Classroom, q.classroom_id)
     is_teacher = (q.teacher_id == u.id or u.role == "admin")
+    if not is_teacher and not s.query(ClassroomMember).filter_by(classroom_id=q.classroom_id, student_id=u.id).first():
+        raise HTTPException(403, "You do not have access to this leaderboard.")
 
     # Get all attempts sorted according to tie-breaking logic:
     # 1. Higher percentage
@@ -942,6 +1099,8 @@ def classroom_overall_leaderboard(id: int, u=Depends(me), s=Depends(db)):
     c = s.get(Classroom, id)
     if not c:
         raise HTTPException(404, "Classroom not found.")
+    if c.teacher_id != u.id and u.role != "admin" and not s.query(ClassroomMember).filter_by(classroom_id=c.id, student_id=u.id).first():
+        raise HTTPException(403, "You do not have access to this classroom.")
 
     quizzes = s.query(Quiz).filter_by(classroom_id=c.id).all()
     quiz_ids = [q.id for q in quizzes]
@@ -1122,7 +1281,7 @@ def purge_user(s, u):
     s.query(Doc).filter_by(user_id=u.id).delete()
     s.delete(u)
 
-class AdminUserSchema(BaseModel):
+class AdminUserSchema(Clean):
     name: str = Field(min_length=1, max_length=60)
     email: str = Field(pattern=EMAIL_RE)
     password: str = Field(min_length=6)
@@ -1134,7 +1293,7 @@ class AdminUserSchema(BaseModel):
     course: str = Field("", max_length=60)
     division: str = Field("", max_length=20)
 
-class AdminUserUpdate(BaseModel):
+class AdminUserUpdate(Clean):
     name: Optional[str] = Field(None, min_length=1, max_length=60)
     email: Optional[str] = Field(None, pattern=EMAIL_RE)
     password: Optional[str] = Field(None, min_length=6)   # only set to reset the password
@@ -1149,6 +1308,7 @@ class AdminUserUpdate(BaseModel):
 
 def admin_create_user(b, role, a, s):
     email = b.email.strip().lower()
+    check_pw(b.password)
     if s.query(User).filter_by(email=email).first():
         raise HTTPException(400, "A user with this email already exists.")
     user = User(email=email, name=b.name.strip(), pw=hash_pw(b.password), role=role, active=True, created_by=a.id)
@@ -1204,6 +1364,7 @@ def admin_update_user(id: int, b: AdminUserUpdate, a=Depends(admin), s=Depends(d
     if b.name is not None:
         u.name = b.name.strip()
     if b.password:
+        check_pw(b.password)
         u.pw = hash_pw(b.password)
     if b.active is not None:
         u.active = b.active
@@ -1248,7 +1409,7 @@ def admin_export(role: str = "teacher", a=Depends(admin), s=Depends(db)):
     w.writerow(CSV_COLS)
     for u in s.query(User).filter_by(role=role).order_by(User.id).all():
         d = user_dict(u)
-        w.writerow([d[c] for c in CSV_COLS])
+        w.writerow([("'" + str(d[c])) if str(d[c])[:1] in ("=", "+", "-", "@", "\t", "\r") else d[c] for c in CSV_COLS])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f"attachment; filename={role}s.csv"})
 
@@ -1263,8 +1424,8 @@ async def admin_import(role: str = Form("teacher"), file: UploadFile = File(...)
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         email, name, pw = row.get("email", "").lower(), row.get("name", ""), row.get("password", "")
         import re as _re
-        if not name or not _re.match(EMAIL_RE, email) or len(pw) < 6:
-            skipped.append(f"row {i}: needs name, valid email, password (6+ chars)")
+        if not name or not _re.match(EMAIL_RE, email) or len(pw) < 8 or len(pw) > 72 or not _re.search(r"[A-Za-z]", pw) or not _re.search(r"\d", pw):
+            skipped.append(f"row {i}: needs name, valid email, password (8+ chars with a letter and a number)")
             continue
         if s.query(User).filter_by(email=email).first():
             skipped.append(f"row {i}: {email} already exists")
